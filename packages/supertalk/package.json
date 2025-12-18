@@ -1,0 +1,61 @@
+{
+  "name": "supertalk",
+  "version": "0.0.1",
+  "description": "Type-safe client/server communication for workers, iframes, and RPC",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "index.d.ts.map",
+    "index.js.map"
+  ],
+  "scripts": {
+    "build": "wireit"
+  },
+  "wireit": {
+    "build": {
+      "command": "tsc --build --pretty",
+      "dependencies": [
+        "../core:build"
+      ],
+      "files": [
+        "src/**/*.ts",
+        "tsconfig.json",
+        "../../tsconfig.base.json"
+      ],
+      "output": [
+        "index.*",
+        ".tsbuildinfo"
+      ],
+      "clean": "if-file-deleted"
+    }
+  },
+  "keywords": [
+    "rpc",
+    "worker",
+    "iframe",
+    "postmessage",
+    "proxy",
+    "comlink",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/user/supertalk.git",
+    "directory": "packages/supertalk"
+  },
+  "dependencies": {
+    "@supertalk/core": "0.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

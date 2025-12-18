@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": ".",
+    "rootDir": "src",
+    "tsBuildInfoFile": ".tsbuildinfo",
+    "composite": true,
+    "paths": {
+      "@supertalk/core": ["../core/src/index.ts"]
+    },
+    "baseUrl": "."
+  },
+  "include": ["src/**/*.ts"],
+  "references": [{"path": "../core"}]
+}

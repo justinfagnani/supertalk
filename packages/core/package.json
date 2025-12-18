@@ -1,0 +1,86 @@
+{
+  "name": "@supertalk/core",
+  "version": "0.0.1",
+  "description": "Type-safe client/server communication for workers, iframes, and RPC",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "index.d.ts.map",
+    "index.js.map",
+    "lib"
+  ],
+  "scripts": {
+    "build": "wireit",
+    "test": "wireit",
+    "test:node": "wireit",
+    "test:browser": "wireit"
+  },
+  "wireit": {
+    "build": {
+      "command": "tsc --build --pretty",
+      "files": [
+        "src/**/*.ts",
+        "tsconfig.json",
+        "../../tsconfig.base.json"
+      ],
+      "output": [
+        "index.*",
+        "lib/**",
+        "test/**",
+        ".tsbuildinfo"
+      ],
+      "clean": "if-file-deleted"
+    },
+    "test": {
+      "dependencies": [
+        "test:node",
+        "test:browser"
+      ]
+    },
+    "test:node": {
+      "command": "node --test test/node/*_test.js",
+      "dependencies": [
+        "build"
+      ],
+      "files": [],
+      "output": []
+    },
+    "test:browser": {
+      "command": "web-test-runner test/browser/*_test.js --node-resolve",
+      "dependencies": [
+        "build"
+      ],
+      "files": [
+        "web-test-runner.config.js"
+      ],
+      "output": []
+    }
+  },
+  "keywords": [
+    "rpc",
+    "worker",
+    "iframe",
+    "postmessage",
+    "proxy",
+    "comlink",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/user/supertalk.git",
+    "directory": "packages/core"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "typescript": "^5.7.2"
+  }
+}
