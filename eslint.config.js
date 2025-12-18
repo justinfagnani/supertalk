@@ -1,7 +1,16 @@
 import eslint from '@eslint/js';
 import tseslint from 'typescript-eslint';
+import {includeIgnoreFile} from '@eslint/compat';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default tseslint.config(
+  // Include ignores from .gitignore and package-level .gitignore files
+  includeIgnoreFile(path.resolve(__dirname, '.gitignore')),
+  includeIgnoreFile(path.resolve(__dirname, 'packages/core/.gitignore')),
+  includeIgnoreFile(path.resolve(__dirname, 'packages/supertalk/.gitignore')),
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
@@ -25,6 +34,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/*.js', '**/*.mjs'],
+    ignores: ['**/node_modules/**', '**/*.js', '**/*.mjs'],
   },
 );
