@@ -55,19 +55,36 @@ Implementations:
 - `BroadcastChannel`
 - HTTP adapter (request/response as messages)
 
-### Service
+### Services and Proxied Objects
 
-A service is a class or object whose methods can be called remotely:
+A **service** is not a special concept — it's just an object that gets proxied across the communication boundary. The only differences from other proxied objects:
+
+1. It's typically a singleton
+2. It's often the "root" object of a connection
+
+Conceptually, `expose(service, endpoint)` is equivalent to `send(proxy(service))` over an implicit root connection handler.
 
 ```typescript
-@service()
-class MyService {
-  @method()
-  async doSomething(arg: string): Promise<Result> {
-    // ...
-  }
-}
+// These are conceptually equivalent:
+
+// 1. Exposing a service (syntactic sugar)
+expose(new Calculator(), endpoint);
+
+// 2. What's actually happening (pseudocode)
+rootHandler.sendProxy(new Calculator());
 ```
+
+**Implications:**
+
+- Same proxy mechanism for services and any nested proxied object
+- Methods = non-serializable function properties → proxied
+- Serializable properties → cloned/sent
+- No special cases for "top-level" vs nested objects
+
+**Method enumeration:**
+
+- Plain objects: own enumerable properties that are functions
+- Class instances: walk prototype chain up to (not including) `Object.prototype`
 
 ### Remote
 

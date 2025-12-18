@@ -6,9 +6,11 @@
  * @packageDocumentation
  */
 
-// Placeholder exports - implementation coming soon
 export const VERSION = '0.0.1';
 
-// Re-export types and utilities as they are implemented:
-// export { expose, wrap } from './api.js';
-// export type { Endpoint, Remote } from './types.js';
+// Core API
+export {expose} from './lib/expose.js';
+export {wrap} from './lib/wrap.js';
+
+// Types
+export type {Endpoint, Remote, Message} from './lib/types.js';

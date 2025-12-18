@@ -31,6 +31,11 @@ export default tseslint.config(
       ],
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/consistent-type-exports': 'error',
+      // Allow async functions in void positions (e.g., event handlers)
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        {checksVoidReturn: false},
+      ],
     },
   },
   {

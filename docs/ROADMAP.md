@@ -20,18 +20,18 @@ Implementation proceeds in phases, each building on the previous. Each phase sho
 
 ---
 
-## Phase 1: Basic RPC
+## Phase 1: Basic RPC ✅
 
 **Goal**: Simple request/response over postMessage
 
 ### Deliverables
 
-- [ ] `Endpoint` interface definition
-- [ ] `expose(obj, endpoint)` — Expose an object's methods
-- [ ] `wrap<T>(endpoint)` — Create typed proxy
-- [ ] Message protocol for call/return/error
-- [ ] Basic error serialization
-- [ ] Works with Worker, MessagePort
+- [x] `Endpoint` interface definition
+- [x] `expose(obj, endpoint)` — Expose an object's methods
+- [x] `wrap<T>(endpoint)` — Create typed proxy
+- [x] Message protocol for call/return/error
+- [x] Basic error serialization
+- [x] Works with Worker, MessagePort
 
 ### API Shape
 
@@ -52,11 +52,11 @@ const result = await proxy.add(1, 2); // 3
 
 ### Tests
 
-- [ ] Basic method call and return
-- [ ] Multiple concurrent calls
-- [ ] Error propagation
-- [ ] Worker communication
-- [ ] MessagePort communication
+- [x] Basic method call and return
+- [x] Multiple concurrent calls
+- [x] Error propagation
+- [ ] Worker communication (tested via MessagePort, Worker test pending)
+- [x] MessagePort communication
 
 ---
 

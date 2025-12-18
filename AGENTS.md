@@ -140,7 +140,38 @@ Note: Some features may require runtime metadata from decorators, which would ne
 
 Never manually clear the Wireit cache. If a script isn't running when expected, check that all input files are listed in the `files` array.
 
+**IMPORTANT**: Wireit handles dependencies automatically. When running tests, do NOT run `build` separately — just run `npm run test:node` and Wireit will build first if needed. The `dependencies` field in wireit config ensures correct ordering.
+
+**CRITICAL - Running Commands**:
+
+- **ALWAYS run from the monorepo root** (`/Users/justin/Projects/Web/supertalk`)
+- **NEVER cd into package directories** to run scripts
+- Use `npm run <script>` for root scripts: `npm run test`, `npm run test:node`, `npm run lint`
+- Use `npm run -w @supertalk/core <script>` to run a script in a specific workspace
+- This ensures Wireit properly coordinates dependencies across packages
+
 **Code generation**: Avoid if possible, but remain open if type inference proves insufficient.
+
+### 2024-12-17: Services Are Just Proxied Objects
+
+**Key insight**: A "service" is not a special concept — it's just an object that gets proxied and sent across the communication boundary. The only differences from other proxied objects are:
+
+1. It's usually a singleton
+2. It's often the "root" object of a connection (unnamed)
+
+This means `expose(service)` is conceptually `send(proxy(service))`. There's an implicit "root connection handler" that manages handshakes and the initial service exposure.
+
+**Implications**:
+
+- The same proxy mechanism works for services and any other proxied object
+- Methods are just non-serializable function properties that get proxied
+- Serializable properties get cloned/sent
+- No special cases for "top-level" vs nested objects
+
+**Method enumeration**:
+
+- For plain objects: own enumerable properties
+- For class instances: walk prototype chain up to (but not including) Object.prototype
 
 ---
 
