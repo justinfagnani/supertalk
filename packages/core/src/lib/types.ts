@@ -9,7 +9,7 @@
  * This abstracts over Worker, MessagePort, Window, etc.
  */
 export interface Endpoint {
-  postMessage(message: unknown, transfer?: Transferable[]): void;
+  postMessage(message: unknown, transfer?: Array<Transferable>): void;
   addEventListener(
     type: 'message',
     listener: (event: MessageEvent) => void,
@@ -27,7 +27,7 @@ export interface Endpoint {
  * - Non-function properties are excluded for now (Phase 1)
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyFunction = (...args: any[]) => any;
+type AnyFunction = (...args: Array<any>) => any;
 
 export type Remote<T> = {
   [K in keyof T as T[K] extends AnyFunction ? K : never]: T[K] extends (
@@ -52,17 +52,27 @@ export type Message =
   | ReleaseMessage;
 
 /**
- * Call a method on a target object or invoke a function directly.
+ * Action type for CallMessage.
+ *
+ * - 'call': Invoke a method or function with arguments
+ * - 'get': Get a property value (method must be property name)
+ */
+export type CallAction = 'call' | 'get';
+
+/**
+ * Call a method on a target object, invoke a function, or get a property.
  *
  * - target: 0 for root service, otherwise a proxy ID
- * - method: method name, or undefined for direct function invocation
+ * - action: 'call' to invoke, 'get' to get property
+ * - method: method/property name, or undefined for direct function invocation
  */
 export interface CallMessage {
   type: 'call';
   id: number;
   target: number;
+  action: CallAction;
   method: string | undefined;
-  args: WireValue[];
+  args: Array<WireValue>;
 }
 
 export interface ReturnMessage {

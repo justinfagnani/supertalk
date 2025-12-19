@@ -16,6 +16,7 @@ import type {
 import {
   createCallMessage,
   createProxyCallMessage,
+  createProxyGetMessage,
   createReleaseMessage,
   createReturnMessage,
   createThrowMessage,
@@ -25,6 +26,18 @@ import {
   fromWireValue,
 } from './protocol.js';
 import {SourceRegistry, ProxyRegistry} from './proxy-registry.js';
+
+/**
+ * A callable function that is also thenable.
+ * Enables both `await proxy.method(args)` and `await proxy.property`.
+ */
+interface CallableThenable {
+  (...args: Array<unknown>): Promise<unknown>;
+  then<TResult1 = unknown, TResult2 = never>(
+    onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): Promise<TResult1 | TResult2>;
+}
 
 /**
  * Pending call waiting for a response.
@@ -89,22 +102,120 @@ export function wrap<T extends object>(endpoint: Endpoint): Remote<T> {
     endpoint.postMessage(createReleaseMessage(proxyId));
   });
 
-  // Create a proxy function for invoking a remote proxy
-  const createRemoteProxy = (proxyId: number): object => {
-    const fn = (...args: unknown[]) => {
-      const wireArgs = args.map((arg) =>
-        toWireValue(arg, (value) => localObjects.register(value)),
-      );
-      const {promise, resolve, reject} = Promise.withResolvers<unknown>();
-      const id = nextCallId++;
-      pending.set(id, {resolve, reject});
-      endpoint.postMessage(
-        createProxyCallMessage(id, proxyId, undefined, wireArgs),
-      );
-      return promise;
+  /**
+   * Make an RPC call and return a promise for the result.
+   */
+  const makeCall = (
+    target: number,
+    method: string | undefined,
+    args: Array<unknown>,
+  ): Promise<unknown> => {
+    const wireArgs = args.map((arg) =>
+      toWireValue(arg, (value) => localObjects.register(value)),
+    );
+    const {promise, resolve, reject} = Promise.withResolvers<unknown>();
+    const id = nextCallId++;
+    pending.set(id, {resolve, reject});
+    endpoint.postMessage(createProxyCallMessage(id, target, method, wireArgs));
+    return promise;
+  };
+
+  /**
+   * Make a property GET request and return a promise for the result.
+   */
+  const makeGet = (target: number, property: string): Promise<unknown> => {
+    const {promise, resolve, reject} = Promise.withResolvers<unknown>();
+    const id = nextCallId++;
+    pending.set(id, {resolve, reject});
+    endpoint.postMessage(createProxyGetMessage(id, target, property));
+    return promise;
+  };
+
+  /**
+   * Create a "callable thenable" for a property on a remote object.
+   *
+   * This enables both:
+   * - `await proxy.prop` → property GET (one round trip)
+   * - `await proxy.method(args)` → method CALL (one round trip)
+   *
+   * The trick: return a function that also has a `.then()` method.
+   * - When called as function: makes a method call
+   * - When awaited: makes a property get
+   */
+  const createCallableThenable = (
+    target: number,
+    prop: string,
+  ): CallableThenable => {
+    // The callable part: when invoked as a function, call the method
+    const callable = (...args: Array<unknown>): Promise<unknown> => {
+      return makeCall(target, prop, args).then(processReturnValue);
     };
-    remoteProxies.set(proxyId, fn);
-    return fn;
+
+    // The thenable part: when awaited, get the property
+    callable.then = <TResult1 = unknown, TResult2 = never>(
+      onfulfilled?:
+        | ((value: unknown) => TResult1 | PromiseLike<TResult1>)
+        | null,
+      onrejected?:
+        | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+        | null,
+    ): Promise<TResult1 | TResult2> => {
+      // Make a GET request for the property value
+      return makeGet(target, prop)
+        .then(processReturnValue)
+        .then(onfulfilled, onrejected);
+    };
+
+    return callable;
+  };
+
+  /**
+   * Process a return value, converting proxy references to actual proxies.
+   */
+  const processReturnValue = (value: unknown): unknown => {
+    return value;
+  };
+
+  /**
+   * Create a proxy for a remote object (class instance, function, etc.)
+   *
+   * For functions: the proxy is directly callable
+   * For objects: property access returns callable-thenables
+   */
+  const createRemoteProxy = (proxyId: number): object => {
+    // Check if we already have a proxy for this ID
+    const existing = remoteProxies.get(proxyId);
+    if (existing) {
+      return existing;
+    }
+
+    // Create a function that can be called directly (for function proxies)
+    // but also acts as an object with property access (for class instances)
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    const proxyTarget = function () {} as unknown as object;
+
+    const proxy = new Proxy(proxyTarget, {
+      // Direct invocation: proxy(args) → call the remote function/object
+      apply(_target, _thisArg, args: Array<unknown>) {
+        return makeCall(proxyId, undefined, args).then(processReturnValue);
+      },
+
+      // Property access: proxy.prop → callable-thenable
+      get(_target, prop) {
+        if (typeof prop !== 'string') {
+          return undefined;
+        }
+        // Special case: 'then' on the proxy itself for awaiting the whole object
+        // This shouldn't normally happen for class instances, but handle it
+        if (prop === 'then') {
+          return undefined; // Not thenable at the top level
+        }
+        return createCallableThenable(proxyId, prop);
+      },
+    });
+
+    remoteProxies.set(proxyId, proxy);
+    return proxy;
   };
 
   // Listen for messages
@@ -165,14 +276,14 @@ export function wrap<T extends object>(endpoint: Endpoint): Remote<T> {
           if (typeof proxyTarget !== 'function') {
             throw new TypeError('Target is not callable');
           }
-          result = await (proxyTarget as (...a: unknown[]) => unknown)(
+          result = await (proxyTarget as (...a: Array<unknown>) => unknown)(
             ...deserializedArgs,
           );
         } else {
           // Method invocation
           const targetObj = proxyTarget as Record<
             string,
-            (...a: unknown[]) => unknown
+            (...a: Array<unknown>) => unknown
           >;
           const fn = targetObj[method];
           if (typeof fn !== 'function') {
@@ -201,7 +312,7 @@ export function wrap<T extends object>(endpoint: Endpoint): Remote<T> {
       }
 
       // Return a function that sends a call message
-      return (...args: unknown[]) => {
+      return (...args: Array<unknown>) => {
         const wireArgs = args.map((arg) =>
           toWireValue(arg, (value) => localObjects.register(value)),
         );

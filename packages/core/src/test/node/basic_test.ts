@@ -24,8 +24,8 @@ void suite('expose and wrap', () => {
 
   void test('async method call', async () => {
     using ctx = setupService({
-      async fetchValue(): Promise<string> {
-        return 'hello';
+      fetchValue(): Promise<string> {
+        return Promise.resolve('hello');
       },
     });
 

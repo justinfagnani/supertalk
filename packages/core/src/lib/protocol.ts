@@ -32,32 +32,52 @@ export function isPlainObject(value: unknown): boolean {
 export function createCallMessage(
   id: number,
   method: string,
-  args: WireValue[],
+  args: Array<WireValue>,
 ): CallMessage {
   return {
     type: 'call',
     id,
     target: ROOT_TARGET,
+    action: 'call',
     method,
     args,
   };
 }
 
 /**
- * Create a call message for a proxied target.
+ * Create a call message for a proxied target (method call).
  */
 export function createProxyCallMessage(
   id: number,
   target: number,
   method: string | undefined,
-  args: WireValue[],
+  args: Array<WireValue>,
 ): CallMessage {
   return {
     type: 'call',
     id,
     target,
+    action: 'call',
     method,
     args,
+  };
+}
+
+/**
+ * Create a get message for a proxied target (property access).
+ */
+export function createProxyGetMessage(
+  id: number,
+  target: number,
+  property: string,
+): CallMessage {
+  return {
+    type: 'call',
+    id,
+    target,
+    action: 'get',
+    method: property,
+    args: [],
   };
 }
 

@@ -38,7 +38,7 @@ interface PendingCall {
  * For plain objects: own enumerable properties that are functions.
  * For class instances: walk prototype chain up to (not including) Object.prototype.
  */
-function getMethods(obj: object): string[] {
+function getMethods(obj: object): Array<string> {
   const methods = new Set<string>();
 
   // Walk the prototype chain
@@ -131,7 +131,7 @@ export function expose(obj: object, endpoint: Endpoint): () => void {
 
   // Create a proxy function for a remote proxy ID (e.g., a callback passed from wrap side)
   const createRemoteProxy = (proxyId: number): object => {
-    const fn = (...args: unknown[]) => {
+    const fn = (...args: Array<unknown>) => {
       // Serialize arguments, which may contain more proxies
       const wireArgs = args.map((arg) =>
         toWireValue(arg, (value) => localObjects.register(value)),
@@ -222,7 +222,7 @@ export function expose(obj: object, endpoint: Endpoint): () => void {
       try {
         const targetObj = obj as Record<
           string,
-          (...args: unknown[]) => unknown
+          (...args: Array<unknown>) => unknown
         >;
         const fn = targetObj[method];
         if (fn === undefined) {
@@ -253,25 +253,32 @@ export function expose(obj: object, endpoint: Endpoint): () => void {
 
     try {
       let result: unknown;
-      if (method === undefined) {
+
+      // Handle property GET
+      if (message.action === 'get') {
+        if (method === undefined) {
+          throw new TypeError('Property name required for get action');
+        }
+        result = (proxyTarget as Record<string, unknown>)[method];
+      } else if (method === undefined) {
         // Direct function invocation
         if (typeof proxyTarget !== 'function') {
           throw new TypeError('Target is not callable');
         }
-        result = await (proxyTarget as (...args: unknown[]) => unknown)(
+        result = await (proxyTarget as (...args: Array<unknown>) => unknown)(
           ...deserializedArgs,
         );
       } else {
         // Method invocation on proxied object
-        const targetObj = proxyTarget as Record<
-          string,
-          (...args: unknown[]) => unknown
-        >;
-        const fn = targetObj[method];
-        if (typeof fn !== 'function') {
+        const targetObj = proxyTarget as Record<string, unknown>;
+        const value = targetObj[method];
+        if (typeof value !== 'function') {
           throw new TypeError(`${method} is not a function`);
         }
-        result = await fn.apply(proxyTarget, deserializedArgs);
+        result = await (value as (...args: Array<unknown>) => unknown).apply(
+          proxyTarget,
+          deserializedArgs,
+        );
       }
       const wireResult = toWireValue(result, (value) =>
         localObjects.register(value),

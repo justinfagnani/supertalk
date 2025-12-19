@@ -80,14 +80,14 @@ void suite('function proxying', () => {
 
     void test('callback invoked multiple times', async () => {
       using ctx = setupService({
-        forEach(items: number[], callback: (item: number) => void): void {
+        forEach(items: Array<number>, callback: (item: number) => void): void {
           for (const item of items) {
             callback(item);
           }
         },
       });
 
-      const received: number[] = [];
+      const received: Array<number> = [];
       await new Promise<void>((resolve) => {
         void ctx.remote.forEach([1, 2, 3], (item) => {
           received.push(item);
@@ -174,10 +174,11 @@ void suite('function proxying', () => {
 
       const widget = await ctx.remote.createWidget('Button');
       // Name is cloned (data)
-      assert.strictEqual((widget as Widget).name, 'Button');
+      assert.strictEqual(widget.name, 'Button');
       // activate is proxied (function)
-      const activateFn = (widget as Widget)
-        .activate as unknown as () => Promise<string>;
+      // TODO: This should not require a cast once nested functions are handled
+      // in Remote<T>
+      const activateFn = widget.activate as unknown as () => Promise<string>;
       assert.strictEqual(await activateFn(), 'Button activated!');
     });
   });
@@ -218,11 +219,12 @@ void suite('function proxying', () => {
       });
 
       const ops = await ctx.remote.getOperations();
-      const typedOps = ops as unknown as Array<(n: number) => Promise<number>>;
+      type Op = (n: number) => Promise<number>;
+      const [addOne, double, square] = ops as unknown as [Op, Op, Op];
 
-      assert.strictEqual(await typedOps[0]!(5), 6); // 5 + 1
-      assert.strictEqual(await typedOps[1]!(5), 10); // 5 * 2
-      assert.strictEqual(await typedOps[2]!(5), 25); // 5 ** 2
+      assert.strictEqual(await addOne(5), 6); // 5 + 1
+      assert.strictEqual(await double(5), 10); // 5 * 2
+      assert.strictEqual(await square(5), 25); // 5 ** 2
     });
   });
 });

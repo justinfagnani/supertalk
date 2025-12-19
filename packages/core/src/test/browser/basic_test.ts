@@ -40,7 +40,7 @@ suite('expose and wrap (browser)', () => {
 
     const sum = await proxy.add(2, 3);
     if (sum !== 5) {
-      throw new Error(`Expected 5, got ${sum}`);
+      throw new Error(`Expected 5, got ${String(sum)}`);
     }
 
     const greeting = await proxy.greet('World');
