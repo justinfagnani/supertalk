@@ -12,5 +12,10 @@ export const VERSION = '0.0.1';
 export {expose} from './lib/expose.js';
 export {wrap} from './lib/wrap.js';
 
+// Proxy utilities
+export {ProxyRegistry} from './lib/proxy-registry.js';
+export {isPlainObject} from './lib/protocol.js';
+
 // Types
-export type {Endpoint, Remote, Message} from './lib/types.js';
+export type {Endpoint, Remote, Message, WireValue} from './lib/types.js';
+export {ROOT_TARGET} from './lib/types.js';

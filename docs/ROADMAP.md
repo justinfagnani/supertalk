@@ -60,18 +60,20 @@ const result = await proxy.add(1, 2); // 3
 
 ---
 
-## Phase 2: Function Proxying
+## Phase 2: Function Proxying ✅
 
 **Goal**: Pass callbacks that execute on the sender
 
 ### Deliverables
 
-- [ ] Automatic function detection in arguments
-- [ ] Proxy creation for functions
-- [ ] Proxy ID generation and tracking
-- [ ] Callback invocation protocol
-- [ ] Memory management with WeakRef/FinalizationRegistry
-- [ ] Explicit release API
+- [x] Automatic function detection in arguments
+- [x] Proxy creation for functions
+- [x] Proxy ID generation and tracking
+- [x] Callback invocation protocol
+- [x] Memory management with WeakRef/FinalizationRegistry
+- [x] Explicit release API (via ReleaseMessage)
+- [x] Unified CallMessage with target ID (0 = root service)
+- [x] isPlainObject detection for clone vs proxy decision
 
 ### API Shape
 
@@ -94,17 +96,21 @@ await proxy.subscribe((value) => {
 
 ### Tests
 
-- [ ] Callback invocation
-- [ ] Multiple callbacks
-- [ ] Callback cleanup on GC
-- [ ] Explicit release
-- [ ] Nested callbacks
+- [x] Callback invocation
+- [x] Multiple callbacks
+- [x] Callback with return value
+- [x] Callback invoked multiple times
+- [x] Callbacks nested in objects
+- [x] Callbacks nested in arrays
+- [x] Functions as return values
+- [x] Returned function maintains closure
+- [ ] Callback cleanup on GC (needs manual testing)
 
 ---
 
-## Phase 3: Nested Objects & Sub-Services
+## Phase 3: Class Instance Proxying
 
-**Goal**: Return objects that become proxies
+**Goal**: Return class instances that become proxies
 
 ### Deliverables
 

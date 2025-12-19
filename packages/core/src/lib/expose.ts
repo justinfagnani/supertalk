@@ -4,12 +4,33 @@
  * @packageDocumentation
  */
 
-import type {Endpoint, Message, CallMessage} from './types.js';
+import type {
+  Endpoint,
+  Message,
+  CallMessage,
+  ReleaseMessage,
+  ReturnMessage,
+  ThrowMessage,
+} from './types.js';
+import {ROOT_TARGET} from './types.js';
 import {
+  createProxyCallMessage,
   createReturnMessage,
   createThrowMessage,
+  deserializeError,
   serializeError,
+  toWireValue,
+  fromWireValue,
 } from './protocol.js';
+import {SourceRegistry, ProxyRegistry} from './proxy-registry.js';
+
+/**
+ * Pending call waiting for a response (for callback invocations).
+ */
+interface PendingCall {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+}
 
 /**
  * Get all method names from an object.
@@ -52,6 +73,42 @@ function isCallMessage(message: unknown): message is CallMessage {
 }
 
 /**
+ * Check if message is a release message.
+ */
+function isReleaseMessage(message: unknown): message is ReleaseMessage {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'type' in message &&
+    message.type === 'release'
+  );
+}
+
+/**
+ * Check if message is a return message.
+ */
+function isReturnMessage(message: unknown): message is ReturnMessage {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'type' in message &&
+    message.type === 'return'
+  );
+}
+
+/**
+ * Check if message is a throw message.
+ */
+function isThrowMessage(message: unknown): message is ThrowMessage {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'type' in message &&
+    message.type === 'throw'
+  );
+}
+
+/**
  * Expose an object's methods to be called from the other side of an endpoint.
  *
  * @param obj - The object whose methods to expose
@@ -62,37 +119,164 @@ export function expose(obj: object, endpoint: Endpoint): () => void {
   const methods = getMethods(obj);
   const methodSet = new Set(methods);
 
+  // Registry for objects we're exposing to the remote side (strong refs)
+  const localObjects = new SourceRegistry();
+
+  // Registry for proxies to remote objects we've received (weak refs)
+  const remoteProxies = new ProxyRegistry();
+
+  // Pending calls for callback invocations (we call remote, wait for response)
+  let nextCallId = 1;
+  const pendingCalls = new Map<number, PendingCall>();
+
+  // Create a proxy function for a remote proxy ID (e.g., a callback passed from wrap side)
+  const createRemoteProxy = (proxyId: number): object => {
+    const fn = (...args: unknown[]) => {
+      // Serialize arguments, which may contain more proxies
+      const wireArgs = args.map((arg) =>
+        toWireValue(arg, (value) => localObjects.register(value)),
+      );
+      const {promise, resolve, reject} = Promise.withResolvers<unknown>();
+      const id = nextCallId++;
+      pendingCalls.set(id, {resolve, reject});
+      // Send call message to invoke the callback on the wrap side
+      endpoint.postMessage(
+        createProxyCallMessage(id, proxyId, undefined, wireArgs),
+      );
+      return promise;
+    };
+    remoteProxies.set(proxyId, fn);
+    return fn;
+  };
+
   const handleMessage = async (event: MessageEvent<Message>) => {
     const message: unknown = event.data;
+
+    // Handle release messages
+    if (isReleaseMessage(message)) {
+      localObjects.release(message.proxyId);
+      return;
+    }
+
+    // Handle return messages (responses to our callback invocations)
+    if (isReturnMessage(message)) {
+      const call = pendingCalls.get(message.id);
+      if (call) {
+        pendingCalls.delete(message.id);
+        try {
+          const value = fromWireValue(
+            message.value,
+            (pid) => remoteProxies.get(pid),
+            createRemoteProxy,
+          );
+          call.resolve(value);
+        } catch (error) {
+          call.reject(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        }
+      }
+      return;
+    }
+
+    // Handle throw messages (errors from our callback invocations)
+    if (isThrowMessage(message)) {
+      const call = pendingCalls.get(message.id);
+      if (call) {
+        pendingCalls.delete(message.id);
+        call.reject(deserializeError(message.error));
+      }
+      return;
+    }
 
     // Only handle call messages
     if (!isCallMessage(message)) {
       return;
     }
 
-    const {id, method, args} = message;
+    const {id, target, method, args} = message;
 
-    // Check if method exists
-    if (!methodSet.has(method)) {
+    // Deserialize arguments
+    const deserializedArgs = args.map((arg) =>
+      fromWireValue(
+        arg,
+        (proxyId) => remoteProxies.get(proxyId),
+        createRemoteProxy,
+      ),
+    );
+
+    // Handle root service call
+    if (target === ROOT_TARGET) {
+      // Check if method exists
+      if (method === undefined || !methodSet.has(method)) {
+        endpoint.postMessage(
+          createThrowMessage(id, {
+            name: 'TypeError',
+            message: `Method "${String(method)}" is not exposed`,
+          }),
+        );
+        return;
+      }
+
+      // Call the method and handle result
+      try {
+        const targetObj = obj as Record<
+          string,
+          (...args: unknown[]) => unknown
+        >;
+        const fn = targetObj[method];
+        if (fn === undefined) {
+          throw new Error(`Method "${method}" not found`);
+        }
+        const result: unknown = await fn.apply(obj, deserializedArgs);
+        const wireResult = toWireValue(result, (value) =>
+          localObjects.register(value),
+        );
+        endpoint.postMessage(createReturnMessage(id, wireResult));
+      } catch (error) {
+        endpoint.postMessage(createThrowMessage(id, serializeError(error)));
+      }
+      return;
+    }
+
+    // Handle proxied target call
+    const proxyTarget = localObjects.get(target);
+    if (!proxyTarget) {
       endpoint.postMessage(
         createThrowMessage(id, {
-          name: 'TypeError',
-          message: `Method "${method}" is not exposed`,
+          name: 'ReferenceError',
+          message: `Proxy target ${String(target)} not found`,
         }),
       );
       return;
     }
 
-    // Call the method and handle result
     try {
-      // We already verified the method exists via methodSet.has(method)
-      const target = obj as Record<string, (...args: unknown[]) => unknown>;
-      const fn = target[method];
-      if (fn === undefined) {
-        throw new Error(`Method "${method}" not found`);
+      let result: unknown;
+      if (method === undefined) {
+        // Direct function invocation
+        if (typeof proxyTarget !== 'function') {
+          throw new TypeError('Target is not callable');
+        }
+        result = await (proxyTarget as (...args: unknown[]) => unknown)(
+          ...deserializedArgs,
+        );
+      } else {
+        // Method invocation on proxied object
+        const targetObj = proxyTarget as Record<
+          string,
+          (...args: unknown[]) => unknown
+        >;
+        const fn = targetObj[method];
+        if (typeof fn !== 'function') {
+          throw new TypeError(`${method} is not a function`);
+        }
+        result = await fn.apply(proxyTarget, deserializedArgs);
       }
-      const result: unknown = await fn.apply(obj, args);
-      endpoint.postMessage(createReturnMessage(id, result));
+      const wireResult = toWireValue(result, (value) =>
+        localObjects.register(value),
+      );
+      endpoint.postMessage(createReturnMessage(id, wireResult));
     } catch (error) {
       endpoint.postMessage(createThrowMessage(id, serializeError(error)));
     }

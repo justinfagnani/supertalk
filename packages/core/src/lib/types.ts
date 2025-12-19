@@ -38,27 +38,51 @@ export type Remote<T> = {
 };
 
 /**
+ * Reserved target ID for the root service.
+ */
+export const ROOT_TARGET = 0;
+
+/**
  * Message types for the wire protocol.
  */
-export type Message = CallMessage | ReturnMessage | ThrowMessage;
+export type Message =
+  | CallMessage
+  | ReturnMessage
+  | ThrowMessage
+  | ReleaseMessage;
 
+/**
+ * Call a method on a target object or invoke a function directly.
+ *
+ * - target: 0 for root service, otherwise a proxy ID
+ * - method: method name, or undefined for direct function invocation
+ */
 export interface CallMessage {
   type: 'call';
   id: number;
-  method: string;
-  args: unknown[];
+  target: number;
+  method: string | undefined;
+  args: WireValue[];
 }
 
 export interface ReturnMessage {
   type: 'return';
   id: number;
-  value: unknown;
+  value: WireValue;
 }
 
 export interface ThrowMessage {
   type: 'throw';
   id: number;
   error: SerializedError;
+}
+
+/**
+ * Release a proxy, allowing the source to garbage collect the target.
+ */
+export interface ReleaseMessage {
+  type: 'release';
+  proxyId: number;
 }
 
 /**
@@ -69,3 +93,14 @@ export interface SerializedError {
   message: string;
   stack?: string;
 }
+
+/**
+ * Wire format for values that may contain proxy references.
+ *
+ * Raw values (primitives, plain objects, arrays) are sent as-is via structured clone.
+ * Functions and class instances are replaced with proxy references.
+ */
+export type WireValue =
+  | {type: 'raw'; value: unknown}
+  | {type: 'proxy'; proxyId: number}
+  | {type: 'thrown'; error: SerializedError};
