@@ -10,7 +10,7 @@
     "test": "wireit",
     "test:node": "wireit",
     "test:browser": "wireit",
-    "lint": "eslint packages/*/src/**/*.ts",
+    "lint": "eslint \"packages/*/src/**/*.ts\"",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "ignore-sync": "ignore-sync ."

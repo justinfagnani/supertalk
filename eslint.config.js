@@ -1,4 +1,5 @@
 import eslint from '@eslint/js';
+import {defineConfig} from 'eslint/config';
 import tseslint from 'typescript-eslint';
 import {includeIgnoreFile} from '@eslint/compat';
 import {fileURLToPath} from 'node:url';
@@ -6,14 +7,14 @@ import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export default tseslint.config(
+export default defineConfig(
   // Include ignores from .gitignore and package-level .gitignore files
   includeIgnoreFile(path.resolve(__dirname, '.gitignore')),
   includeIgnoreFile(path.resolve(__dirname, 'packages/core/.gitignore')),
   includeIgnoreFile(path.resolve(__dirname, 'packages/supertalk/.gitignore')),
   eslint.configs.recommended,
-  ...tseslint.configs.strictTypeChecked,
-  ...tseslint.configs.stylisticTypeChecked,
+  tseslint.configs.strictTypeChecked,
+  tseslint.configs.stylisticTypeChecked,
   {
     languageOptions: {
       parserOptions: {
@@ -36,9 +37,16 @@ export default tseslint.config(
         'error',
         {checksVoidReturn: false},
       ],
+      // Prefer Array<T> over T[]
+      '@typescript-eslint/array-type': ['error', {default: 'generic'}],
     },
   },
   {
-    ignores: ['**/node_modules/**', '**/*.js', '**/*.mjs'],
+    ignores: [
+      '**/node_modules/**',
+      '**/*.js',
+      '**/*.mjs',
+      'packages/supertalk/**',
+    ],
   },
 );

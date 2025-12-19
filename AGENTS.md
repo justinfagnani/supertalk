@@ -69,6 +69,15 @@ It aims to replace [Comlink](https://github.com/GoogleChromeLabs/comlink/) (whic
 - Prettier with project config
 - ESLint with strict TypeScript rules
 - Consistent type imports: `import type { Foo } from './foo.js'`
+- **Prefer type inference** — Don't annotate field or variable types when they can be inferred. Use generics at the constructor/function call instead:
+
+  ```typescript
+  // ✅ Good: type inferred from constructor
+  #docs = new Map<string, unknown>();
+
+  // ❌ Avoid: redundant type annotation
+  #docs: Map<string, unknown> = new Map();
+  ```
 
 ## Workflow Instructions
 
