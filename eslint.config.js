@@ -39,6 +39,7 @@ export default defineConfig(
       ],
       // Prefer Array<T> over T[]
       '@typescript-eslint/array-type': ['error', {default: 'generic'}],
+      '@typescript-eslint/no-confusing-void-expression': 'off',
     },
   },
   {
