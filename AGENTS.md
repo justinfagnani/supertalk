@@ -182,6 +182,34 @@ This means `expose(service)` is conceptually `send(proxy(service))`. There's an 
 - For plain objects: own enumerable properties
 - For class instances: walk prototype chain up to (but not including) Object.prototype
 
+### 2024-12-19: No Global Configuration
+
+**Design principle**: Unlike Comlink's global `transferHandlers` map, supertalk has no global state. All configuration is scoped to individual connections via options to `expose()` and `wrap()`.
+
+**Comlink's global state**:
+
+- `Comlink.transferHandlers` — must be configured identically on both sides
+- Creates coupling between unrelated connections
+- Makes testing harder (global state persists between tests)
+
+**supertalk approach**:
+
+- Configuration via options: `wrap(endpoint, { autoProxy: true })`
+- Each connection is isolated
+- Easier to test and reason about
+
+### 2024-12-19: Auto-Proxy Mode Design
+
+**Problem**: Automatically traversing payloads to detect functions/proxies has cost and may not always be desired.
+
+**Decision**: Auto-proxy is opt-in (default off). The two modes are:
+
+1. **Manual mode (default)**: Only top-level args and return values are considered for proxying. Nested functions fail to clone (throws error). Simple, predictable, no traversal overhead.
+
+2. **Auto-proxy mode (opt-in)**: Full payload traversal. Functions and non-plain objects anywhere in the graph are proxied. Diamond patterns result in the same proxy instance.
+
+**Rationale for abandoning transfer-list pattern**: Considered a postMessage-style transfer list for explicit nested proxies, but replacing proxy markers with actual Proxy objects requires knowing paths, and functions can't be markers. Simpler to just have two clear modes.
+
 ---
 
 ## Package Structure

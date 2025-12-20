@@ -108,16 +108,18 @@ await proxy.subscribe((value) => {
 
 ---
 
-## Phase 3: Class Instance Proxying
+## Phase 3: Class Instance Proxying ✅
 
 **Goal**: Return class instances that become proxies
 
 ### Deliverables
 
-- [ ] Object reference tracking
-- [ ] Nested proxy creation
-- [ ] Property access on proxies
-- [ ] Sub-service pattern
+- [x] Object reference tracking
+- [x] Nested proxy creation
+- [x] Property access on proxies (CallableThenable pattern)
+- [x] Sub-service pattern
+- [ ] Circular reference handling
+- [ ] Callback cleanup on GC (needs manual testing)
 
 ### API Shape
 
@@ -140,10 +142,97 @@ const docs = await users.find({});
 
 ### Tests
 
-- [ ] Return object becomes proxy
-- [ ] Chained method calls
+- [x] Return object becomes proxy
+- [x] Chained method calls
 - [ ] Nested object cleanup
 - [ ] Circular reference handling
+
+---
+
+## Phase 3.5: Auto-Proxy Mode & Object Graph Handling
+
+**Goal**: Explicit control over proxying behavior
+
+### Design Principle: No Global Configuration
+
+Unlike Comlink which uses a global `transferHandlers` map, supertalk configures
+all behavior per-connection via options to `expose()` and `wrap()`.
+
+### Deliverables
+
+- [ ] Opt-in auto-proxy mode via options
+- [ ] Top-level-only proxying in manual mode (default)
+- [ ] Diamond-shaped object graph handling in auto-proxy mode
+- [ ] Identity preservation across the connection
+
+### Auto-Proxy Mode (default: off)
+
+```typescript
+// With auto-proxy (opt-in for full traversal)
+const remote = wrap<Service>(endpoint, {autoProxy: true});
+expose(service, endpoint, {autoProxy: true});
+
+// Without auto-proxy (default, simpler mental model)
+const remote = wrap<Service>(endpoint); // autoProxy: false
+```
+
+### Manual Proxy Mode (default)
+
+When `autoProxy: false` (the default), **only top-level values are considered
+for proxying** — the direct arguments and return values. Nested values are
+cloned via structured clone.
+
+This is simpler and more predictable:
+
+- No payload traversal overhead
+- Clear boundary: "what I pass/return might be proxied, nested stuff is copied"
+- Functions nested in objects will fail to clone (throws error)
+
+```typescript
+// Top-level function arg: proxied
+await remote.subscribe((x) => console.log(x)); // ✓ callback proxied
+
+// Nested function in object: ERROR (not auto-proxied)
+await remote.configure({
+  name: 'test',
+  onChange: (x) => console.log(x), // ✗ fails to clone
+});
+```
+
+If you need nested proxies without full auto-proxy, use auto-proxy mode.
+
+### Auto-Proxy Mode (opt-in)
+
+When `autoProxy: true`, the full payload is traversed to find functions and
+non-plain objects, which are automatically proxied. This enables nested
+callbacks and richer data structures.
+
+### Object Graph Identity (auto-proxy only)
+
+```typescript
+// Exposed side
+const shared = {value: 42};
+const service = {
+  getData() {
+    return {
+      a: shared,
+      b: shared, // Same object
+    };
+  },
+};
+
+// Wrapped side
+const data = await remote.getData();
+data.a === data.b; // Should be true!
+```
+
+### Tests
+
+- [ ] Auto-proxy mode opt-in works
+- [ ] Manual mode only proxies top-level args/returns
+- [ ] Nested functions in manual mode throw on clone
+- [ ] Diamond object graph → same proxy instance (auto-proxy)
+- [ ] Deep diamond graphs (auto-proxy)
 
 ---
 

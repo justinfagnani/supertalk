@@ -36,6 +36,26 @@ The root service is just a proxied object like any other — there's nothing
 special about it. In the future, we plan to support multiple named services over
 a single connection.
 
+### No Global Configuration
+
+Comlink uses a global `transferHandlers` map that must be configured identically
+on both sides of the connection. This creates coupling between unrelated
+connections and makes testing harder.
+
+In supertalk, all configuration happens when setting up individual connections
+via `expose()` and `wrap()`. This includes:
+
+- Auto-proxying behavior (opt-in per connection)
+- Custom serializers
+- Allowed origins
+
+```ts
+// Configuration is scoped to this connection
+const remote = wrap<Service>(endpoint, {
+  autoProxy: true, // opt-in to automatic nested proxying
+});
+```
+
 ### Future Goals
 
 - **Streams**: Support `ReadableStream`/`WritableStream` across the boundary
