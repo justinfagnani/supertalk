@@ -6,7 +6,7 @@
 
 import {MessageChannel, type MessagePort} from 'node:worker_threads';
 import {expose, wrap} from '../../index.js';
-import type {Remote} from '../../index.js';
+import type {Remote, Options} from '../../index.js';
 
 /**
  * A disposable test context that sets up a service and remote proxy over a MessageChannel.
@@ -34,11 +34,14 @@ export interface ServiceContext<T extends object> {
  * // ports are automatically closed when ctx goes out of scope
  * ```
  */
-export function setupService<T extends object>(service: T): ServiceContext<T> {
+export function setupService<T extends object>(
+  service: T,
+  options: Options = {},
+): ServiceContext<T> {
   const {port1, port2} = new MessageChannel();
 
-  expose(service, port1);
-  const remote = wrap<T>(port2);
+  expose(service, port1, options);
+  const remote = wrap<T>(port2, options);
 
   return {
     remote,

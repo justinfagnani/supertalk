@@ -105,6 +105,39 @@ export interface SerializedError {
 }
 
 /**
+ * Options for configuring expose() and wrap().
+ */
+export interface Options {
+  /**
+   * Enable automatic proxying of nested functions and class instances.
+   *
+   * When `false` (default): Only top-level arguments and return values are
+   * considered for proxying. Nested functions or class instances will fail
+   * with a `DataCloneError` from structured clone. Use `debug: true` for
+   * better error messages.
+   *
+   * When `true`: Full payload traversal finds functions and class instances
+   * anywhere in the object graph and proxies them automatically.
+   *
+   * @default false
+   */
+  autoProxy?: boolean;
+
+  /**
+   * Enable debug mode for better error messages.
+   *
+   * When `true` and `autoProxy` is `false`, performs payload traversal to
+   * detect non-cloneable values and throw a helpful `NonCloneableError` with
+   * the path to the problematic value (e.g., "options.onChange").
+   *
+   * Has no effect when `autoProxy` is `true` (traversal happens anyway).
+   *
+   * @default false
+   */
+  debug?: boolean;
+}
+
+/**
  * Wire format for values that may contain proxy references.
  *
  * Raw values (primitives, plain objects, arrays) are sent as-is via structured clone.

@@ -11,10 +11,12 @@ import type {
   ReleaseMessage,
   ReturnMessage,
   ThrowMessage,
+  Options,
 } from './types.js';
 import {ROOT_TARGET} from './types.js';
 import {
   createProxyCallMessage,
+  createProxyGetMessage,
   createReturnMessage,
   createThrowMessage,
   deserializeError,
@@ -113,9 +115,15 @@ function isThrowMessage(message: unknown): message is ThrowMessage {
  *
  * @param obj - The object whose methods to expose
  * @param endpoint - The endpoint to listen on (Worker, MessagePort, etc.)
+ * @param options - Configuration options
  * @returns A cleanup function to stop listening
  */
-export function expose(obj: object, endpoint: Endpoint): () => void {
+export function expose(
+  obj: object,
+  endpoint: Endpoint,
+  options: Options = {},
+): () => void {
+  const {autoProxy = false, debug = false} = options;
   const methods = getMethods(obj);
   const methodSet = new Set(methods);
 
@@ -129,24 +137,109 @@ export function expose(obj: object, endpoint: Endpoint): () => void {
   let nextCallId = 1;
   const pendingCalls = new Map<number, PendingCall>();
 
-  // Create a proxy function for a remote proxy ID (e.g., a callback passed from wrap side)
-  const createRemoteProxy = (proxyId: number): object => {
-    const fn = (...args: Array<unknown>) => {
-      // Serialize arguments, which may contain more proxies
-      const wireArgs = args.map((arg) =>
-        toWireValue(arg, (value) => localObjects.register(value)),
-      );
-      const {promise, resolve, reject} = Promise.withResolvers<unknown>();
-      const id = nextCallId++;
-      pendingCalls.set(id, {resolve, reject});
-      // Send call message to invoke the callback on the wrap side
-      endpoint.postMessage(
-        createProxyCallMessage(id, proxyId, undefined, wireArgs),
-      );
-      return promise;
+  /**
+   * Make an RPC call to the remote side and return a promise for the result.
+   */
+  const makeCall = (
+    target: number,
+    method: string | undefined,
+    args: Array<unknown>,
+  ): Promise<unknown> => {
+    const wireArgs = args.map((arg) =>
+      toWireValue(
+        arg,
+        (value) => localObjects.register(value),
+        autoProxy,
+        debug,
+      ),
+    );
+    const {promise, resolve, reject} = Promise.withResolvers<unknown>();
+    const id = nextCallId++;
+    pendingCalls.set(id, {resolve, reject});
+    endpoint.postMessage(createProxyCallMessage(id, target, method, wireArgs));
+    return promise;
+  };
+
+  /**
+   * Make a property GET request to the remote side.
+   */
+  const makeGet = (target: number, property: string): Promise<unknown> => {
+    const {promise, resolve, reject} = Promise.withResolvers<unknown>();
+    const id = nextCallId++;
+    pendingCalls.set(id, {resolve, reject});
+    endpoint.postMessage(createProxyGetMessage(id, target, property));
+    return promise;
+  };
+
+  /**
+   * Create a "callable thenable" for a property on a remote proxy.
+   *
+   * This enables both:
+   * - `await proxy.method(args)` → method CALL
+   * - `await proxy.prop` → property GET
+   */
+  const createCallableThenable = (
+    target: number,
+    prop: string,
+  ): ((...args: Array<unknown>) => Promise<unknown>) & {
+    then: <T1, T2>(
+      onfulfilled?: ((value: unknown) => T1 | PromiseLike<T1>) | null,
+      onrejected?: ((reason: unknown) => T2 | PromiseLike<T2>) | null,
+    ) => Promise<T1 | T2>;
+  } => {
+    const callable = (...args: Array<unknown>): Promise<unknown> => {
+      return makeCall(target, prop, args);
     };
-    remoteProxies.set(proxyId, fn);
-    return fn;
+
+    callable.then = <T1 = unknown, T2 = never>(
+      onfulfilled?: ((value: unknown) => T1 | PromiseLike<T1>) | null,
+      onrejected?: ((reason: unknown) => T2 | PromiseLike<T2>) | null,
+    ): Promise<T1 | T2> => {
+      return makeGet(target, prop).then(onfulfilled, onrejected);
+    };
+
+    return callable;
+  };
+
+  /**
+   * Create a proxy for a remote object (passed from wrap side).
+   *
+   * For functions: the proxy is directly callable
+   * For objects: property access returns callable-thenables
+   */
+  const createRemoteProxy = (proxyId: number): object => {
+    // Check if we already have a proxy for this ID
+    const existing = remoteProxies.get(proxyId);
+    if (existing) {
+      return existing;
+    }
+
+    // Create a function that can be called directly (for function proxies)
+    // but also acts as an object with property access (for class instances)
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    const proxyTarget = function () {} as unknown as object;
+
+    const proxy = new Proxy(proxyTarget, {
+      // Direct invocation: proxy(args) → call the remote function
+      apply(_target, _thisArg, args: Array<unknown>) {
+        return makeCall(proxyId, undefined, args);
+      },
+
+      // Property access: proxy.prop → callable-thenable
+      get(_target, prop) {
+        if (typeof prop !== 'string') {
+          return undefined;
+        }
+        // 'then' at top level means this is not thenable itself
+        if (prop === 'then') {
+          return undefined;
+        }
+        return createCallableThenable(proxyId, prop);
+      },
+    });
+
+    remoteProxies.set(proxyId, proxy);
+    return proxy;
   };
 
   const handleMessage = async (event: MessageEvent<Message>) => {
@@ -229,8 +322,11 @@ export function expose(obj: object, endpoint: Endpoint): () => void {
           throw new Error(`Method "${method}" not found`);
         }
         const result: unknown = await fn.apply(obj, deserializedArgs);
-        const wireResult = toWireValue(result, (value) =>
-          localObjects.register(value),
+        const wireResult = toWireValue(
+          result,
+          (value) => localObjects.register(value),
+          autoProxy,
+          debug,
         );
         endpoint.postMessage(createReturnMessage(id, wireResult));
       } catch (error) {
@@ -280,8 +376,11 @@ export function expose(obj: object, endpoint: Endpoint): () => void {
           deserializedArgs,
         );
       }
-      const wireResult = toWireValue(result, (value) =>
-        localObjects.register(value),
+      const wireResult = toWireValue(
+        result,
+        (value) => localObjects.register(value),
+        autoProxy,
+        debug,
       );
       endpoint.postMessage(createReturnMessage(id, wireResult));
     } catch (error) {

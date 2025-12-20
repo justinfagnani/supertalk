@@ -149,7 +149,7 @@ const docs = await users.find({});
 
 ---
 
-## Phase 3.5: Auto-Proxy Mode & Object Graph Handling
+## Phase 3.5: Auto-Proxy Mode & Object Graph Handling ✅
 
 **Goal**: Explicit control over proxying behavior
 
@@ -160,10 +160,11 @@ all behavior per-connection via options to `expose()` and `wrap()`.
 
 ### Deliverables
 
-- [ ] Opt-in auto-proxy mode via options
-- [ ] Top-level-only proxying in manual mode (default)
-- [ ] Diamond-shaped object graph handling in auto-proxy mode
-- [ ] Identity preservation across the connection
+- [x] Opt-in auto-proxy mode via options
+- [x] Top-level-only proxying in manual mode (default)
+- [x] Diamond-shaped object graph handling in auto-proxy mode
+- [x] Identity preservation across the connection
+- [x] Debug mode with helpful `NonCloneableError` messages
 
 ### Auto-Proxy Mode (default: off)
 
@@ -199,6 +200,20 @@ await remote.configure({
 });
 ```
 
+### Debug Mode
+
+For better DX when debugging clone errors, enable `debug: true`. This traverses
+the payload to produce helpful `NonCloneableError` messages with the path to
+the problematic value, without the overhead of actually creating proxies:
+
+```typescript
+// Development: get helpful error messages
+const remote = wrap<Service>(endpoint, {debug: true});
+
+// Error: NonCloneableError: Value of type 'function' at path 'onChange'
+// cannot be cloned. Enable autoProxy or use proxy() to wrap this value.
+```
+
 If you need nested proxies without full auto-proxy, use auto-proxy mode.
 
 ### Auto-Proxy Mode (opt-in)
@@ -228,11 +243,12 @@ data.a === data.b; // Should be true!
 
 ### Tests
 
-- [ ] Auto-proxy mode opt-in works
-- [ ] Manual mode only proxies top-level args/returns
-- [ ] Nested functions in manual mode throw on clone
-- [ ] Diamond object graph → same proxy instance (auto-proxy)
-- [ ] Deep diamond graphs (auto-proxy)
+- [x] Auto-proxy mode opt-in works
+- [x] Manual mode only proxies top-level args/returns
+- [x] Nested functions in manual mode throw on clone
+- [x] Debug mode produces NonCloneableError with path
+- [x] Diamond object graph → same proxy instance (auto-proxy)
+- [x] Deep diamond graphs (auto-proxy)
 
 ---
 

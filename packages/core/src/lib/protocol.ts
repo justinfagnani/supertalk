@@ -164,20 +164,50 @@ export type ProxyRegistrar = (value: object) => number;
 export type ProxyResolver = (proxyId: number) => object | undefined;
 
 /**
+ * Error thrown when a non-cloneable value is encountered in manual mode.
+ */
+export class NonCloneableError extends Error {
+  constructor(
+    public readonly valueType: 'function' | 'class-instance',
+    public readonly path: string,
+  ) {
+    const typeName =
+      valueType === 'function'
+        ? 'Function'
+        : 'Class instance (non-plain object)';
+    super(
+      `${typeName} found at "${path}" cannot be sent across the boundary. ` +
+        `In manual mode (autoProxy: false), only top-level functions and ` +
+        `class instances are proxied. Enable autoProxy: true to proxy nested values.`,
+    );
+    this.name = 'NonCloneableError';
+  }
+}
+
+/**
  * Serialize a value for transmission, replacing proxy-needing values with references.
  *
- * Walks the value recursively:
+ * In auto-proxy mode (autoProxy: true), walks the value recursively:
  * - Functions → proxy reference
  * - Class instances → proxy reference
  * - Plain objects → recursively process properties
  * - Arrays → recursively process elements
  * - Primitives → raw value
+ *
+ * In manual mode (autoProxy: false, the default), only top-level values are
+ * considered for proxying. Nested values are passed through to structured clone,
+ * which will throw DataCloneError for non-cloneable values like functions.
+ *
+ * In debug mode (debug: true with autoProxy: false), traversal happens to detect
+ * non-cloneable values early and throw NonCloneableError with helpful paths.
  */
 export function toWireValue(
   value: unknown,
   registerProxy: ProxyRegistrar,
+  autoProxy = false,
+  debug = false,
 ): WireValue {
-  // Functions are always proxied
+  // Functions are always proxied at top level
   if (typeof value === 'function') {
     const proxyId = registerProxy(value as object);
     return {type: 'proxy', proxyId};
@@ -188,25 +218,37 @@ export function toWireValue(
     return {type: 'raw', value};
   }
 
-  // Arrays: recursively process elements
+  // Arrays: only traverse if autoProxy or debug is enabled
   if (Array.isArray(value)) {
-    const processed = value.map((item) => processForClone(item, registerProxy));
-    return {type: 'raw', value: processed};
-  }
-
-  // Plain objects: recursively process properties
-  if (isPlainObject(value)) {
-    const processed: Record<string, unknown> = {};
-    for (const key of Object.keys(value)) {
-      processed[key] = processForClone(
-        (value as Record<string, unknown>)[key],
-        registerProxy,
+    if (autoProxy || debug) {
+      const processed = value.map((item, index) =>
+        processForClone(item, registerProxy, autoProxy, `[${String(index)}]`),
       );
+      return {type: 'raw', value: processed};
     }
-    return {type: 'raw', value: processed};
+    // Manual mode without debug: pass through to structured clone
+    return {type: 'raw', value};
   }
 
-  // Class instances: proxy the whole thing
+  // Plain objects: only traverse if autoProxy or debug is enabled
+  if (isPlainObject(value)) {
+    if (autoProxy || debug) {
+      const processed: Record<string, unknown> = {};
+      for (const key of Object.keys(value)) {
+        processed[key] = processForClone(
+          (value as Record<string, unknown>)[key],
+          registerProxy,
+          autoProxy,
+          key,
+        );
+      }
+      return {type: 'raw', value: processed};
+    }
+    // Manual mode without debug: pass through to structured clone
+    return {type: 'raw', value};
+  }
+
+  // Class instances: proxy the whole thing at top level
   const proxyId = registerProxy(value);
   return {type: 'proxy', proxyId};
 }
@@ -214,12 +256,25 @@ export function toWireValue(
 /**
  * Process a value for inclusion in a cloned structure.
  * Returns the processed value (not wrapped in WireValue).
+ *
+ * In manual mode (autoProxy: false), throws NonCloneableError for functions
+ * and class instances. In auto-proxy mode, replaces them with proxy markers.
+ *
+ * @param value - The value to process
+ * @param registerProxy - Callback to register a value for proxying
+ * @param autoProxy - Whether auto-proxy mode is enabled
+ * @param path - The path to this value (for error messages)
  */
 function processForClone(
   value: unknown,
   registerProxy: ProxyRegistrar,
+  autoProxy: boolean,
+  path: string,
 ): unknown {
   if (typeof value === 'function') {
+    if (!autoProxy) {
+      throw new NonCloneableError('function', path);
+    }
     // Replace function with a marker that includes the proxy ID
     const proxyId = registerProxy(value as object);
     return {__supertalk_proxy__: proxyId};
@@ -230,7 +285,14 @@ function processForClone(
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => processForClone(item, registerProxy));
+    return value.map((item, index) =>
+      processForClone(
+        item,
+        registerProxy,
+        autoProxy,
+        `${path}[${String(index)}]`,
+      ),
+    );
   }
 
   if (isPlainObject(value)) {
@@ -239,12 +301,17 @@ function processForClone(
       processed[key] = processForClone(
         (value as Record<string, unknown>)[key],
         registerProxy,
+        autoProxy,
+        `${path}.${key}`,
       );
     }
     return processed;
   }
 
   // Class instance nested in a cloned structure
+  if (!autoProxy) {
+    throw new NonCloneableError('class-instance', path);
+  }
   const proxyId = registerProxy(value);
   return {__supertalk_proxy__: proxyId};
 }

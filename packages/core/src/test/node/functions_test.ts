@@ -142,11 +142,15 @@ void suite('function proxying', () => {
         onComplete: (result: number) => void;
       }
 
-      using ctx = setupService({
-        processWithOptions(options: Options): void {
-          options.onComplete(options.value * 2);
+      // Nested functions require autoProxy: true
+      using ctx = setupService(
+        {
+          processWithOptions(options: Options): void {
+            options.onComplete(options.value * 2);
+          },
         },
-      });
+        {autoProxy: true},
+      );
 
       const result = await new Promise<number>((resolve) => {
         void ctx.remote.processWithOptions({
@@ -163,14 +167,18 @@ void suite('function proxying', () => {
         activate: () => string;
       }
 
-      using ctx = setupService({
-        createWidget(name: string): Widget {
-          return {
-            name,
-            activate: () => `${name} activated!`,
-          };
+      // Nested functions require autoProxy: true
+      using ctx = setupService(
+        {
+          createWidget(name: string): Widget {
+            return {
+              name,
+              activate: () => `${name} activated!`,
+            };
+          },
         },
-      });
+        {autoProxy: true},
+      );
 
       const widget = await ctx.remote.createWidget('Button');
       // Name is cloned (data)
@@ -185,13 +193,17 @@ void suite('function proxying', () => {
 
   void suite('functions nested in arrays', () => {
     void test('callbacks in array argument', async () => {
-      using ctx = setupService({
-        invokeAll(callbacks: Array<() => void>): void {
-          for (const cb of callbacks) {
-            cb();
-          }
+      // Nested functions require autoProxy: true
+      using ctx = setupService(
+        {
+          invokeAll(callbacks: Array<() => void>): void {
+            for (const cb of callbacks) {
+              cb();
+            }
+          },
         },
-      });
+        {autoProxy: true},
+      );
 
       let count = 0;
       await new Promise<void>((resolve) => {
@@ -212,11 +224,15 @@ void suite('function proxying', () => {
     });
 
     void test('functions in returned array', async () => {
-      using ctx = setupService({
-        getOperations(): Array<(n: number) => number> {
-          return [(n) => n + 1, (n) => n * 2, (n) => n ** 2];
+      // Nested functions require autoProxy: true
+      using ctx = setupService(
+        {
+          getOperations(): Array<(n: number) => number> {
+            return [(n) => n + 1, (n) => n * 2, (n) => n ** 2];
+          },
         },
-      });
+        {autoProxy: true},
+      );
 
       const ops = await ctx.remote.getOperations();
       type Op = (n: number) => Promise<number>;

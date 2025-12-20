@@ -20,9 +20,11 @@ but explores a few different design choices:
 
 ### Nested Object Support
 
-Comlink proxies the top-level object but doesn't automatically proxy nested
-objects returned from methods. supertalk treats all values uniformly — functions
-and class instances are proxied wherever they appear.
+With `autoProxy: true`, supertalk treats all values uniformly — functions and
+class instances are proxied wherever they appear, including nested inside
+returned objects. Comlink doesn't have a built-in auto-proxy mode, though it can
+be achieved via custom `transferHandlers`
+([tracking issue](https://github.com/GoogleChromeLabs/comlink/issues/662)).
 
 ```ts
 // Nested functions are automatically proxied
@@ -36,14 +38,11 @@ The root service is just a proxied object like any other — there's nothing
 special about it. In the future, we plan to support multiple named services over
 a single connection.
 
-### No Global Configuration
+### Per-Connection Configuration
 
-Comlink uses a global `transferHandlers` map that must be configured identically
-on both sides of the connection. This creates coupling between unrelated
-connections and makes testing harder.
-
-In supertalk, all configuration happens when setting up individual connections
-via `expose()` and `wrap()`. This includes:
+All configuration in supertalk is scoped to individual connections via
+`expose()` and `wrap()`, rather than using global state. This keeps connections
+independent and makes testing straightforward. Configurable options include:
 
 - Auto-proxying behavior (opt-in per connection)
 - Custom serializers
@@ -55,6 +54,38 @@ const remote = wrap<Service>(endpoint, {
   autoProxy: true, // opt-in to automatic nested proxying
 });
 ```
+
+### Debugging Utilities
+
+Debugging `DataCloneError` can be tricky — the browser says "could not be
+cloned" without telling you _where_ in your data the problem is.
+
+supertalk provides a `debug` option that traverses your data before sending and
+throws a `NonCloneableError` with the exact path to the problematic value:
+
+```ts
+// Enable debug mode for helpful error messages
+const remote = wrap<Service>(endpoint, {debug: true});
+
+// Now when something fails to clone, you get:
+// NonCloneableError: Value of type 'function' at path 'config.onChange'
+// cannot be cloned. Enable autoProxy or use proxy() to wrap this value.
+```
+
+The `NonCloneableError` includes:
+
+- `valueType`: What kind of value failed (`'function'` or `'class-instance'`)
+- `path`: The dot-notation path to the value (e.g., `'config.items[0].callback'`)
+
+**Performance note**: Debug mode adds overhead from traversing your data.
+For production, either disable debug mode (the default) or use `autoProxy: true`
+which traverses anyway to convert values.
+
+| Mode              | Traverses Data | Error Quality      | Use Case                 |
+| ----------------- | -------------- | ------------------ | ------------------------ |
+| Default (manual)  | No             | Browser's generic  | Production, simple data  |
+| `debug: true`     | Yes            | Path + type info   | Development, debugging   |
+| `autoProxy: true` | Yes            | N/A (proxies work) | Production, complex data |
 
 ### Future Goals
 
@@ -113,13 +144,15 @@ An object is considered "plain" if its prototype is either:
 
 Everything else (class instances, objects with custom prototypes) is proxied.
 
-### Nested Values
+### Nested Values (with autoProxy)
 
-Values nested inside cloned structures (objects/arrays) are processed
-recursively:
+When `autoProxy: true` is enabled, values nested inside cloned structures
+(objects/arrays) are processed recursively:
 
 ```ts
-// On exposed side
+// On exposed side (expose with autoProxy)
+expose(service, self, {autoProxy: true});
+
 const service = {
   getData() {
     return {
@@ -130,16 +163,24 @@ const service = {
   },
 };
 
-// On wrapped side
+// On wrapped side (wrap with autoProxy)
+const remote = wrap<typeof service>(worker, {autoProxy: true});
+
 const data = await remote.getData();
 data.name; // 'example' (local copy)
 data.items; // [1, 2, 3] (local copy)
 await data.process(5); // 10 (calls back to exposed side)
 ```
 
+**Without `autoProxy`**, nested functions or class instances will cause the
+browser's structured clone to fail with `DataCloneError`. Use `debug: true`
+during development to get helpful error messages that show exactly which
+value failed and where.
+
 ### Callbacks
 
-Functions passed as arguments are automatically proxied:
+Functions passed as **top-level arguments** are always proxied (no `autoProxy`
+needed):
 
 ```ts
 // Exposed side

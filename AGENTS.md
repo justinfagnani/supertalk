@@ -202,13 +202,17 @@ This means `expose(service)` is conceptually `send(proxy(service))`. There's an 
 
 **Problem**: Automatically traversing payloads to detect functions/proxies has cost and may not always be desired.
 
-**Decision**: Auto-proxy is opt-in (default off). The two modes are:
+**Decision**: Auto-proxy is opt-in (default off). The three modes are:
 
-1. **Manual mode (default)**: Only top-level args and return values are considered for proxying. Nested functions fail to clone (throws error). Simple, predictable, no traversal overhead.
+1. **Manual mode (default)**: Only top-level args and return values are considered for proxying. Nested functions fail to clone (browser's DataCloneError). Simple, predictable, no traversal overhead.
 
-2. **Auto-proxy mode (opt-in)**: Full payload traversal. Functions and non-plain objects anywhere in the graph are proxied. Diamond patterns result in the same proxy instance.
+2. **Debug mode (opt-in)**: Traverses payloads to detect non-cloneable values and throws `NonCloneableError` with the exact path. Useful for development when debugging DataCloneError is frustrating.
 
-**Rationale for abandoning transfer-list pattern**: Considered a postMessage-style transfer list for explicit nested proxies, but replacing proxy markers with actual Proxy objects requires knowing paths, and functions can't be markers. Simpler to just have two clear modes.
+3. **Auto-proxy mode (opt-in)**: Full payload traversal. Functions and non-plain objects anywhere in the graph are proxied. Diamond patterns result in the same proxy instance.
+
+**Why debug mode**: Comlink users often struggle with `DataCloneError` because the browser doesn't say _where_ in the data the problem is. Debug mode solves this without the full cost of auto-proxying.
+
+**Rationale for abandoning transfer-list pattern**: Considered a postMessage-style transfer list for explicit nested proxies, but replacing proxy markers with actual Proxy objects requires knowing paths, and functions can't be markers. Simpler to just have three clear modes.
 
 ---
 

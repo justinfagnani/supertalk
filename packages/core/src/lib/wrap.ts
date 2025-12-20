@@ -12,6 +12,7 @@ import type {
   ThrowMessage,
   CallMessage,
   WireValue,
+  Options,
 } from './types.js';
 import {
   createCallMessage,
@@ -87,9 +88,14 @@ function isCallMessage(message: unknown): message is CallMessage {
  * Create a typed proxy that forwards method calls to a remote endpoint.
  *
  * @param endpoint - The endpoint to send calls to (Worker, MessagePort, etc.)
+ * @param options - Configuration options
  * @returns A proxy object that forwards method calls
  */
-export function wrap<T extends object>(endpoint: Endpoint): Remote<T> {
+export function wrap<T extends object>(
+  endpoint: Endpoint,
+  options: Options = {},
+): Remote<T> {
+  const {autoProxy = false, debug = false} = options;
   let nextCallId = 1;
   const pending = new Map<number, PendingCall>();
 
@@ -111,7 +117,12 @@ export function wrap<T extends object>(endpoint: Endpoint): Remote<T> {
     args: Array<unknown>,
   ): Promise<unknown> => {
     const wireArgs = args.map((arg) =>
-      toWireValue(arg, (value) => localObjects.register(value)),
+      toWireValue(
+        arg,
+        (value) => localObjects.register(value),
+        autoProxy,
+        debug,
+      ),
     );
     const {promise, resolve, reject} = Promise.withResolvers<unknown>();
     const id = nextCallId++;
@@ -291,8 +302,11 @@ export function wrap<T extends object>(endpoint: Endpoint): Remote<T> {
           }
           result = await fn.apply(proxyTarget, deserializedArgs);
         }
-        const wireResult = toWireValue(result, (value) =>
-          localObjects.register(value),
+        const wireResult = toWireValue(
+          result,
+          (value) => localObjects.register(value),
+          autoProxy,
+          debug,
         );
         endpoint.postMessage(createReturnMessage(id, wireResult));
       } catch (error) {
@@ -314,7 +328,12 @@ export function wrap<T extends object>(endpoint: Endpoint): Remote<T> {
       // Return a function that sends a call message
       return (...args: Array<unknown>) => {
         const wireArgs = args.map((arg) =>
-          toWireValue(arg, (value) => localObjects.register(value)),
+          toWireValue(
+            arg,
+            (value) => localObjects.register(value),
+            autoProxy,
+            debug,
+          ),
         );
         const {promise, resolve, reject} = Promise.withResolvers<unknown>();
         const id = nextCallId++;
