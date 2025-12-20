@@ -11,9 +11,9 @@ export const VERSION = '0.0.1';
 // Core API
 export {expose} from './lib/expose.js';
 export {wrap} from './lib/wrap.js';
+export {Connection} from './lib/connection.js';
 
-// Proxy utilities
-export {ProxyRegistry} from './lib/proxy-registry.js';
+// Utilities
 export {isPlainObject, NonCloneableError} from './lib/protocol.js';
 
 // Types

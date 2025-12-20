@@ -22,14 +22,21 @@ export class SourceRegistry {
   /**
    * Register an object and return its ID.
    * If already registered, returns existing ID.
+   *
+   * @param target - The object to register
+   * @param explicitId - Optional explicit ID to use (e.g., ROOT_TARGET)
    */
-  register(target: object): number {
+  register(target: object, explicitId?: number): number {
     const existingId = this.#targetToId.get(target);
     if (existingId !== undefined) {
       return existingId;
     }
 
-    const id = this.#nextId++;
+    const id = explicitId ?? this.#nextId++;
+    // Ensure nextId stays ahead of any explicit IDs
+    if (explicitId !== undefined && explicitId >= this.#nextId) {
+      this.#nextId = explicitId + 1;
+    }
     this.#idToTarget.set(id, target);
     this.#targetToId.set(target, id);
     return id;
