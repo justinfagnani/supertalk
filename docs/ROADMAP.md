@@ -252,7 +252,66 @@ data.a === data.b; // Should be true!
 
 ---
 
-## Phase 4: Decorators
+## Phase 4: Promise Support
+
+**Goal**: Full promise support across the boundary in both directions
+
+Promises are class instances, so they need special handling. In auto-proxy mode,
+promises anywhere in the object graph should be detected and proxied. In debug
+mode, we should produce helpful errors since promises may not cause
+`DataCloneError` but won't work correctly without `autoProxy`.
+
+### Deliverables
+
+- [ ] Promise detection in arguments and return values
+- [ ] Bidirectional promise passing (both sides can send promises)
+- [ ] Promise resolution/rejection protocol
+- [ ] Nested promises in objects, arrays, class fields (with autoProxy)
+- [ ] Debug mode warnings for promises without autoProxy
+- [ ] Multiple promises in same payload
+
+### API Shape
+
+```typescript
+// Worker sends promise in return value
+expose(
+  {
+    fetchUser(id: string): {profile: Promise<Profile>; posts: Promise<Post[]>} {
+      return {
+        profile: fetchProfile(id),
+        posts: fetchPosts(id),
+      };
+    },
+  },
+  self,
+  {autoProxy: true},
+);
+
+// Main receives and awaits nested promises
+const user = await proxy.fetchUser('123');
+const profile = await user.profile; // Resolves remotely
+const posts = await user.posts;
+
+// Main sends promise as argument
+await proxy.processData(fetchDataLocally()); // Promise resolved on main side
+```
+
+### Tests
+
+- [ ] Promise as top-level return value (already works via async)
+- [ ] Promise in return object property (autoProxy)
+- [ ] Promise in return array element (autoProxy)
+- [ ] Promise as argument to remote method
+- [ ] Promise in argument object property (autoProxy)
+- [ ] Promise rejection propagates correctly
+- [ ] Multiple promises in same object
+- [ ] Deeply nested promises
+- [ ] Debug mode error for nested promise without autoProxy
+- [ ] Promise in class instance field (autoProxy)
+
+---
+
+## Phase 5: Decorators
 
 **Goal**: Declarative service definition
 
@@ -286,7 +345,7 @@ expose(new Calculator(), self);
 
 ---
 
-## Phase 5: Streams
+## Phase 6: Streams
 
 **Goal**: Transfer ReadableStream/WritableStream
 
@@ -323,47 +382,6 @@ for await (const chunk of stream) {
 - [ ] Async iteration
 - [ ] Large data streaming
 - [ ] Stream cancellation
-
----
-
-## Phase 6: Promise-Valued Properties
-
-**Goal**: Objects with promises that resolve remotely
-
-### Deliverables
-
-- [ ] Promise detection in return values
-- [ ] Promise resolution protocol
-- [ ] Nested promise handling
-
-### API Shape
-
-```typescript
-// Worker
-expose(
-  {
-    fetchUser(id: string): {profile: Promise<Profile>; posts: Promise<Post[]>} {
-      return {
-        profile: fetchProfile(id),
-        posts: fetchPosts(id),
-      };
-    },
-  },
-  self,
-);
-
-// Main
-const user = await proxy.fetchUser('123');
-const profile = await user.profile; // Resolves remotely
-const posts = await user.posts;
-```
-
-### Tests
-
-- [ ] Promise in return object
-- [ ] Multiple promises
-- [ ] Promise rejection
-- [ ] Nested promises
 
 ---
 
