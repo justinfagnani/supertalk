@@ -11,9 +11,13 @@ import type {
   ReturnMessage,
   ThrowMessage,
   CallMessage,
+  PromiseResolveMessage,
+  PromiseRejectMessage,
   WireValue,
   Options,
+  ProxyPropertyMetadata,
 } from './types.js';
+import {PROXY_PROPERTY_BRAND} from './types.js';
 import {
   createCallMessage,
   createProxyCallMessage,
@@ -21,6 +25,8 @@ import {
   createReleaseMessage,
   createReturnMessage,
   createThrowMessage,
+  createPromiseResolveMessage,
+  createPromiseRejectMessage,
   deserializeError,
   serializeError,
   toWireValue,
@@ -31,13 +37,15 @@ import {SourceRegistry, ProxyRegistry} from './proxy-registry.js';
 /**
  * A callable function that is also thenable.
  * Enables both `await proxy.method(args)` and `await proxy.property`.
+ * Branded with metadata so it can be detected and serialized specially.
  */
-interface CallableThenable {
+interface ProxyProperty {
   (...args: Array<unknown>): Promise<unknown>;
   then<TResult1 = unknown, TResult2 = never>(
     onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2>;
+  [PROXY_PROPERTY_BRAND]: ProxyPropertyMetadata;
 }
 
 /**
@@ -85,6 +93,34 @@ function isCallMessage(message: unknown): message is CallMessage {
 }
 
 /**
+ * Check if message is a promise resolve message.
+ */
+function isPromiseResolveMessage(
+  message: unknown,
+): message is PromiseResolveMessage {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'type' in message &&
+    message.type === 'promise-resolve'
+  );
+}
+
+/**
+ * Check if message is a promise reject message.
+ */
+function isPromiseRejectMessage(
+  message: unknown,
+): message is PromiseRejectMessage {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'type' in message &&
+    message.type === 'promise-reject'
+  );
+}
+
+/**
  * Create a typed proxy that forwards method calls to a remote endpoint.
  *
  * @param endpoint - The endpoint to send calls to (Worker, MessagePort, etc.)
@@ -108,6 +144,56 @@ export function wrap<T extends object>(
     endpoint.postMessage(createReleaseMessage(proxyId));
   });
 
+  // Track promises we've sent to the remote side
+  let nextPromiseId = 1;
+
+  // Track promises we've received from the remote side
+  const pendingRemotePromises = new Map<number, PendingCall>();
+
+  /**
+   * Check if a value is a proxy we received from the remote side.
+   * If so, return its original ID so we can send it back.
+   */
+  const getRemoteProxyId = (value: object): number | undefined => {
+    return remoteProxies.getId(value);
+  };
+
+  /**
+   * Register a promise for sending to the remote side.
+   * Attaches handlers to forward resolution/rejection.
+   */
+  const registerPromise = (promise: Promise<unknown>): number => {
+    const promiseId = nextPromiseId++;
+    promise.then(
+      (value) => {
+        const wireValue = toWireValue(
+          value,
+          (v) => localObjects.register(v),
+          autoProxy,
+          debug,
+          registerPromise,
+          getRemoteProxyId,
+        );
+        endpoint.postMessage(createPromiseResolveMessage(promiseId, wireValue));
+      },
+      (error: unknown) => {
+        endpoint.postMessage(
+          createPromiseRejectMessage(promiseId, serializeError(error)),
+        );
+      },
+    );
+    return promiseId;
+  };
+
+  /**
+   * Create a local promise for a remote promise ID.
+   */
+  const createRemotePromise = (promiseId: number): Promise<unknown> => {
+    const {promise, resolve, reject} = Promise.withResolvers<unknown>();
+    pendingRemotePromises.set(promiseId, {resolve, reject});
+    return promise;
+  };
+
   /**
    * Make an RPC call and return a promise for the result.
    */
@@ -122,6 +208,8 @@ export function wrap<T extends object>(
         (value) => localObjects.register(value),
         autoProxy,
         debug,
+        registerPromise,
+        getRemoteProxyId,
       ),
     );
     const {promise, resolve, reject} = Promise.withResolvers<unknown>();
@@ -143,7 +231,7 @@ export function wrap<T extends object>(
   };
 
   /**
-   * Create a "callable thenable" for a property on a remote object.
+   * Create a "proxy property" for a property on a remote object.
    *
    * This enables both:
    * - `await proxy.prop` → property GET (one round trip)
@@ -152,11 +240,11 @@ export function wrap<T extends object>(
    * The trick: return a function that also has a `.then()` method.
    * - When called as function: makes a method call
    * - When awaited: makes a property get
+   *
+   * The callable is branded with metadata so it can be detected when passed
+   * as an argument and serialized as a special wire type.
    */
-  const createCallableThenable = (
-    target: number,
-    prop: string,
-  ): CallableThenable => {
+  const createProxyProperty = (target: number, prop: string): ProxyProperty => {
     // The callable part: when invoked as a function, call the method
     const callable = (...args: Array<unknown>): Promise<unknown> => {
       return makeCall(target, prop, args).then(processReturnValue);
@@ -177,7 +265,13 @@ export function wrap<T extends object>(
         .then(onfulfilled, onrejected);
     };
 
-    return callable;
+    // Brand with metadata for detection and serialization
+    (callable as ProxyProperty)[PROXY_PROPERTY_BRAND] = {
+      targetProxyId: target,
+      property: prop,
+    };
+
+    return callable as ProxyProperty;
   };
 
   /**
@@ -191,7 +285,7 @@ export function wrap<T extends object>(
    * Create a proxy for a remote object (class instance, function, etc.)
    *
    * For functions: the proxy is directly callable
-   * For objects: property access returns callable-thenables
+   * For objects: property access returns proxy properties
    */
   const createRemoteProxy = (proxyId: number): object => {
     // Check if we already have a proxy for this ID
@@ -211,7 +305,7 @@ export function wrap<T extends object>(
         return makeCall(proxyId, undefined, args).then(processReturnValue);
       },
 
-      // Property access: proxy.prop → callable-thenable
+      // Property access: proxy.prop → proxy property
       get(_target, prop) {
         if (typeof prop !== 'string') {
           return undefined;
@@ -221,7 +315,7 @@ export function wrap<T extends object>(
         if (prop === 'then') {
           return undefined; // Not thenable at the top level
         }
-        return createCallableThenable(proxyId, prop);
+        return createProxyProperty(proxyId, prop);
       },
     });
 
@@ -233,15 +327,62 @@ export function wrap<T extends object>(
   const handleMessage = async (event: MessageEvent<Message>) => {
     const message: unknown = event.data;
 
-    if (isReturnMessage(message)) {
+    /**
+     * Resolve a proxy property by looking up the target in localObjects
+     * and accessing the property. This is used when the remote sends back
+     * a proxy property that references one of our local objects.
+     */
+    const resolveProxyProperty = (
+      targetProxyId: number,
+      property: string,
+    ): unknown => {
+      const target = localObjects.get(targetProxyId);
+      if (!target) {
+        throw new ReferenceError(
+          `Proxy property target ${String(targetProxyId)} not found`,
+        );
+      }
+      return (target as Record<string, unknown>)[property];
+    };
+
+    if (isPromiseResolveMessage(message)) {
+      const pending = pendingRemotePromises.get(message.promiseId);
+      if (pending) {
+        pendingRemotePromises.delete(message.promiseId);
+        try {
+          const value = fromWireValue(
+            message.value,
+            (proxyId) =>
+              localObjects.get(proxyId) ?? remoteProxies.get(proxyId),
+            createRemoteProxy,
+            createRemotePromise,
+            resolveProxyProperty,
+          );
+          pending.resolve(value);
+        } catch (error) {
+          pending.reject(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        }
+      }
+    } else if (isPromiseRejectMessage(message)) {
+      const pending = pendingRemotePromises.get(message.promiseId);
+      if (pending) {
+        pendingRemotePromises.delete(message.promiseId);
+        pending.reject(deserializeError(message.error));
+      }
+    } else if (isReturnMessage(message)) {
       const call = pending.get(message.id);
       if (call) {
         pending.delete(message.id);
         try {
           const value = fromWireValue(
             message.value,
-            (proxyId) => remoteProxies.get(proxyId),
+            (proxyId) =>
+              localObjects.get(proxyId) ?? remoteProxies.get(proxyId),
             createRemoteProxy,
+            createRemotePromise,
+            resolveProxyProperty,
           );
           call.resolve(value);
         } catch (error) {
@@ -275,8 +416,10 @@ export function wrap<T extends object>(
       const deserializedArgs = args.map((arg: WireValue) =>
         fromWireValue(
           arg,
-          (proxyId) => remoteProxies.get(proxyId),
+          (proxyId) => localObjects.get(proxyId) ?? remoteProxies.get(proxyId),
           createRemoteProxy,
+          createRemotePromise,
+          resolveProxyProperty,
         ),
       );
 
@@ -307,6 +450,8 @@ export function wrap<T extends object>(
           (value) => localObjects.register(value),
           autoProxy,
           debug,
+          registerPromise,
+          getRemoteProxyId,
         );
         endpoint.postMessage(createReturnMessage(id, wireResult));
       } catch (error) {
@@ -333,6 +478,8 @@ export function wrap<T extends object>(
             (value) => localObjects.register(value),
             autoProxy,
             debug,
+            registerPromise,
+            getRemoteProxyId,
           ),
         );
         const {promise, resolve, reject} = Promise.withResolvers<unknown>();

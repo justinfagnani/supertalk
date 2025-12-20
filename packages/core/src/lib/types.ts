@@ -49,7 +49,9 @@ export type Message =
   | CallMessage
   | ReturnMessage
   | ThrowMessage
-  | ReleaseMessage;
+  | ReleaseMessage
+  | PromiseResolveMessage
+  | PromiseRejectMessage;
 
 /**
  * Action type for CallMessage.
@@ -93,6 +95,24 @@ export interface ThrowMessage {
 export interface ReleaseMessage {
   type: 'release';
   proxyId: number;
+}
+
+/**
+ * Resolve a promise that was sent to the remote side.
+ */
+export interface PromiseResolveMessage {
+  type: 'promise-resolve';
+  promiseId: number;
+  value: WireValue;
+}
+
+/**
+ * Reject a promise that was sent to the remote side.
+ */
+export interface PromiseRejectMessage {
+  type: 'promise-reject';
+  promiseId: number;
+  error: SerializedError;
 }
 
 /**
@@ -142,8 +162,26 @@ export interface Options {
  *
  * Raw values (primitives, plain objects, arrays) are sent as-is via structured clone.
  * Functions and class instances are replaced with proxy references.
+ * Promises are tracked separately for resolution/rejection.
+ * Proxy properties reference a remote proxy's property for direct field access.
  */
 export type WireValue =
   | {type: 'raw'; value: unknown}
   | {type: 'proxy'; proxyId: number}
+  | {type: 'promise'; promiseId: number}
+  | {type: 'proxy-property'; targetProxyId: number; property: string}
   | {type: 'thrown'; error: SerializedError};
+
+/**
+ * Symbol used to brand proxy properties so they can be detected when passed
+ * as arguments. The value contains the target proxy ID and property name.
+ */
+export const PROXY_PROPERTY_BRAND = Symbol('supertalk.proxyProperty');
+
+/**
+ * Metadata stored on proxy properties for detection and serialization.
+ */
+export interface ProxyPropertyMetadata {
+  targetProxyId: number;
+  property: string;
+}

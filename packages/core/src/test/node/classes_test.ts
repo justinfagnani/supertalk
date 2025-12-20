@@ -114,7 +114,7 @@ void suite('class instance proxying', () => {
 
       const counter = await ctx.remote.createCounter('myCounter');
       // Property access should also work via proxy
-      // TODO: This requires the "callable thenable" pattern
+      // TODO: This requires the "proxy property" pattern
       const c = counter as unknown as {name: Promise<string>};
       assert.strictEqual(await c.name, 'myCounter');
     });

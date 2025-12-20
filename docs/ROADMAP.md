@@ -116,7 +116,7 @@ await proxy.subscribe((value) => {
 
 - [x] Object reference tracking
 - [x] Nested proxy creation
-- [x] Property access on proxies (CallableThenable pattern)
+- [x] Property access on proxies (ProxyProperty pattern)
 - [x] Sub-service pattern
 - [ ] Circular reference handling
 - [ ] Callback cleanup on GC (needs manual testing)
@@ -252,7 +252,7 @@ data.a === data.b; // Should be true!
 
 ---
 
-## Phase 4: Promise Support
+## Phase 4: Promise Support ✅
 
 **Goal**: Full promise support across the boundary in both directions
 
@@ -263,12 +263,12 @@ mode, we should produce helpful errors since promises may not cause
 
 ### Deliverables
 
-- [ ] Promise detection in arguments and return values
-- [ ] Bidirectional promise passing (both sides can send promises)
-- [ ] Promise resolution/rejection protocol
-- [ ] Nested promises in objects, arrays, class fields (with autoProxy)
-- [ ] Debug mode warnings for promises without autoProxy
-- [ ] Multiple promises in same payload
+- [x] Promise detection in arguments and return values
+- [x] Bidirectional promise passing (both sides can send promises)
+- [x] Promise resolution/rejection protocol
+- [x] Nested promises in objects, arrays, class fields (with autoProxy)
+- [x] Debug mode warnings for promises without autoProxy
+- [x] Multiple promises in same payload
 
 ### API Shape
 
@@ -293,21 +293,19 @@ const profile = await user.profile; // Resolves remotely
 const posts = await user.posts;
 
 // Main sends promise as argument
-await proxy.processData(fetchDataLocally()); // Promise resolved on main side
+await proxy.processData(fetchDataLocally()); // Promise proxied, resolved when sender resolves
 ```
 
 ### Tests
 
-- [ ] Promise as top-level return value (already works via async)
-- [ ] Promise in return object property (autoProxy)
-- [ ] Promise in return array element (autoProxy)
-- [ ] Promise as argument to remote method
-- [ ] Promise in argument object property (autoProxy)
-- [ ] Promise rejection propagates correctly
-- [ ] Multiple promises in same object
-- [ ] Deeply nested promises
-- [ ] Debug mode error for nested promise without autoProxy
-- [ ] Promise in class instance field (autoProxy)
+- [x] Promise as top-level return value (already works via async)
+- [x] Promise in return object property (autoProxy)
+- [x] Promise in return array element (autoProxy)
+- [x] Promise as argument to remote method
+- [x] Promise rejection propagates correctly
+- [x] Multiple promises in same object
+- [x] Deeply nested promises
+- [x] Debug mode error for nested promise without autoProxy
 
 ---
 
