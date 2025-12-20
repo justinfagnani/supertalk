@@ -25,27 +25,17 @@ export function isProxyProperty(
   value: unknown,
 ): value is {[PROXY_PROPERTY_BRAND]: ProxyPropertyMetadata} {
   return (
-    typeof value === 'function' &&
-    PROXY_PROPERTY_BRAND in value &&
-    typeof (value as Record<symbol, unknown>)[PROXY_PROPERTY_BRAND] === 'object'
+    typeof (value as {[PROXY_PROPERTY_BRAND]: ProxyPropertyMetadata} | null)?.[
+      PROXY_PROPERTY_BRAND
+    ] === 'object'
   );
 }
 
 /**
- * Check if a value is a Promise (or Promise-like with .then and .catch).
- *
- * We require both .then() and .catch() to distinguish from our own
- * "proxy properties" which only have .then(). However, when a value
- * is a remote proxy we created, it will be detected earlier via
- * getRemoteProxyId() and won't reach this check.
+ * Check if a value is a Promise (or thenable).
  */
 export function isPromise(value: unknown): value is Promise<unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as Promise<unknown>).then === 'function' &&
-    typeof (value as Promise<unknown>).catch === 'function'
-  );
+  return typeof (value as PromiseLike<unknown> | null)?.then === 'function';
 }
 
 /**
