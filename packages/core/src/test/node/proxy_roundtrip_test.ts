@@ -45,7 +45,7 @@ void suite('Proxy round-trip', () => {
       // The returned callback should work - when invoked, it calls
       // back to the original function on the wrap side
       assert.ok(returnedCallback);
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- proxy returns Promise at runtime
+      // Remoted makes the callback return Promise<string>
       const result = await returnedCallback();
       assert.strictEqual(result, 'hello from callback');
     });
@@ -101,8 +101,7 @@ void suite('Proxy round-trip', () => {
       const handler = await ctx.remote.createHandler();
       assert.ok(handler);
 
-      // Verify it works
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- proxy returns Promise at runtime
+      // Verify it works - Remoted makes process() return Promise
       const result = await handler.process('test');
       assert.strictEqual(result, 'processed: test');
 
@@ -145,8 +144,7 @@ void suite('Proxy round-trip', () => {
       const wrapper = await ctx.remote.getWrapper();
       const innerProxy = wrapper.inner;
 
-      // Verify the proxy works
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- proxy returns Promise at runtime
+      // Verify the proxy works - Remoted makes getValue() return Promise
       const value = await innerProxy.getValue();
       assert.strictEqual(value, 42);
 
@@ -209,10 +207,9 @@ void suite('Proxy round-trip', () => {
       // Set a callback that returns a class instance
       await ctx.remote.setCallback(() => new Result(21));
 
-      // Invoke and use the result
+      // Invoke and use the result - Remoted makes double() return Promise
       const result = await ctx.remote.invokeCallback();
       assert.ok(result);
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- proxy returns Promise at runtime
       const doubled = await result.double();
       assert.strictEqual(doubled, 42);
     });

@@ -108,13 +108,10 @@ void suite('function proxying', () => {
         },
       });
 
+      // Top-level returned functions are proxied (become async)
+      // Remote<T> correctly types this as () => Promise<number>
       const double = await ctx.remote.getMultiplier(2);
-      // TODO: Remote<T> should recursively transform nested functions.
-      // `double` should be typed as `(n: number) => Promise<number>` but is
-      // currently `(n: number) => number`. See types.ts for the fix.
-      const result = await (
-        double as unknown as (n: number) => Promise<number>
-      )(21);
+      const result = await double(21);
       assert.strictEqual(result, 42);
     });
 
@@ -126,12 +123,12 @@ void suite('function proxying', () => {
         },
       });
 
+      // Top-level returned functions are proxied (become async)
       const counter = await ctx.remote.createCounter();
-      const typedCounter = counter as unknown as () => Promise<number>;
 
-      assert.strictEqual(await typedCounter(), 1);
-      assert.strictEqual(await typedCounter(), 2);
-      assert.strictEqual(await typedCounter(), 3);
+      assert.strictEqual(await counter(), 1);
+      assert.strictEqual(await counter(), 2);
+      assert.strictEqual(await counter(), 3);
     });
   });
 
@@ -183,11 +180,8 @@ void suite('function proxying', () => {
       const widget = await ctx.remote.createWidget('Button');
       // Name is cloned (data)
       assert.strictEqual(widget.name, 'Button');
-      // activate is proxied (function)
-      // TODO: This should not require a cast once nested functions are handled
-      // in Remote<T>
-      const activateFn = widget.activate as unknown as () => Promise<string>;
-      assert.strictEqual(await activateFn(), 'Button activated!');
+      // activate is proxied (function) - RemoteAutoProxy transforms it to async
+      assert.strictEqual(await widget.activate(), 'Button activated!');
     });
   });
 
@@ -234,9 +228,14 @@ void suite('function proxying', () => {
         {autoProxy: true},
       );
 
+      // RemoteAutoProxy transforms the array element functions to async
       const ops = await ctx.remote.getOperations();
-      type Op = (n: number) => Promise<number>;
-      const [addOne, double, square] = ops as unknown as [Op, Op, Op];
+      assert.strictEqual(ops.length, 3);
+
+      const [addOne, double, square] = ops;
+      assert.ok(addOne);
+      assert.ok(double);
+      assert.ok(square);
 
       assert.strictEqual(await addOne(5), 6); // 5 + 1
       assert.strictEqual(await double(5), 10); // 5 * 2

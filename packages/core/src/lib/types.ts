@@ -35,21 +35,189 @@ export interface Endpoint {
   ): void;
 }
 
-/**
- * Converts a type T to its "remote" version where all methods return Promises.
- *
- * - Methods become async (return Promise<Awaited<ReturnType>>)
- * - Non-function properties are excluded for now (Phase 1)
- */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyFunction = (...args: Array<any>) => any;
 
-export type Remote<T> = {
+/**
+ * Converts a type T to its "remote" version where all methods return Promises.
+ *
+ * @typeParam T - The service type to transform
+ * @typeParam ProxiedTypes - Optional tuple of types that should be treated as
+ *   proxied (get `Proxied<T>` treatment with async properties). If omitted,
+ *   only functions are transformed to async; object properties stay as-is.
+ * @typeParam ExcludedTypes - Optional tuple of types that should NOT be proxied
+ *   even if they match something in ProxiedTypes. Useful for plain object types
+ *   that happen to structurally match a proxied class.
+ *
+ * ## Gotchas
+ *
+ * TypeScript uses structural typing, so it cannot distinguish between a class
+ * instance and a plain object with the same shape. If a method can return either:
+ *
+ * ```ts
+ * getWidget(): Widget  // Could be `new WidgetClass()` OR `{ name, activate }`
+ * ```
+ *
+ * And you list `Widget` in ProxiedTypes, plain object returns will be typed
+ * incorrectly (as Proxied) even though they're cloned at runtime.
+ *
+ * **Solutions:**
+ * 1. Use distinct types for plain objects vs class instances
+ * 2. Use ExcludedTypes to carve out exceptions
+ * 3. Only list concrete class types, not interfaces they implement
+ *
+ * @example
+ * ```ts
+ * class Counter {
+ *   name: string;
+ *   increment(): number { ... }
+ * }
+ *
+ * interface Service {
+ *   createCounter(): Counter;
+ *   getData(): { value: number };
+ * }
+ *
+ * // Declare Counter as a proxied type
+ * type MyRemote = Remote<Service, [Counter]>;
+ *
+ * const counter = await remote.createCounter();
+ * await counter.name;       // ✓ Promise<string> (proxied)
+ * await counter.increment(); // ✓ Promise<number>
+ *
+ * const data = await remote.getData();
+ * data.value; // ✓ number (plain object, not proxied)
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Using ExcludedTypes to handle structural overlap
+ * interface WidgetData { name: string; active: boolean }
+ * class Widget { name: string; active: boolean; activate() {} }
+ *
+ * // WidgetData structurally matches Widget, so exclude it
+ * type MyRemote = Remote<Service, [Widget], [WidgetData]>;
+ * ```
+ */
+export type Remote<
+  T,
+  ProxiedTypes extends Array<unknown> = [],
+  ExcludedTypes extends Array<unknown> = [],
+> = {
   [K in keyof T as T[K] extends AnyFunction ? K : never]: T[K] extends (
     ...args: infer A
   ) => infer R
-    ? (...args: A) => Promise<Awaited<R>>
+    ? (...args: A) => Promise<Awaited<Remoted<R, ProxiedTypes, ExcludedTypes>>>
     : never;
+};
+
+/**
+ * Converts a type T to its "remote" version with full recursive transformation.
+ *
+ * @typeParam T - The service type to transform
+ * @typeParam ProxiedTypes - Optional tuple of types that should be treated as
+ *   proxied (get `Proxied<T>` treatment with async properties).
+ * @typeParam ExcludedTypes - Optional tuple of types to exclude from proxying.
+ *
+ * In autoProxy mode:
+ * - Top-level methods become async
+ * - Nested functions in return values also become async
+ * - Types in ProxiedTypes get full proxy treatment (properties async)
+ * - Types in ExcludedTypes are NOT proxied even if they match ProxiedTypes
+ * - Arguments accept both original types and their remoted versions
+ *   (since proxied objects sent back are unwrapped to originals)
+ *
+ * @example
+ * ```ts
+ * interface Service {
+ *   createWidget(): { activate: () => string };
+ * }
+ * // RemoteAutoProxy<Service>.createWidget returns:
+ * // Promise<{ activate: () => Promise<string> }>
+ * ```
+ */
+export type RemoteAutoProxy<
+  T,
+  ProxiedTypes extends Array<unknown> = [],
+  ExcludedTypes extends Array<unknown> = [],
+> = {
+  [K in keyof T as T[K] extends AnyFunction ? K : never]: T[K] extends (
+    ...args: infer A
+  ) => infer R
+    ? (
+        ...args: RemotedArgs<A, ProxiedTypes, ExcludedTypes>
+      ) => Promise<Awaited<Remoted<R, ProxiedTypes, ExcludedTypes>>>
+    : never;
+};
+
+/**
+ * Transform argument types to accept either original or remoted versions.
+ * This handles the round-trip case where a proxied object is passed back
+ * and gets unwrapped to the original.
+ */
+type RemotedArgs<
+  T extends Array<unknown>,
+  ProxiedTypes extends Array<unknown> = [],
+  ExcludedTypes extends Array<unknown> = [],
+> = {
+  [K in keyof T]: T[K] | Remoted<T[K], ProxiedTypes, ExcludedTypes>;
+};
+
+/**
+ * Recursively transforms a type to make all functions async.
+ * Used by Remote and RemoteAutoProxy to transform return values.
+ *
+ * @typeParam T - The type to transform
+ * @typeParam ProxiedTypes - Tuple of types that should be fully proxied
+ *   (both methods and properties become async)
+ * @typeParam ExcludedTypes - Tuple of types that should NOT be proxied
+ *   even if they match ProxiedTypes (takes precedence)
+ *
+ * - Functions become async: `() => T` → `() => Promise<T>`
+ * - Types in ExcludedTypes pass through with only functions transformed
+ * - Types in ProxiedTypes become `Proxied<T>` (properties async)
+ * - Arrays recurse into elements
+ * - Other objects recurse into properties (functions only transformed)
+ * - Primitives pass through unchanged
+ */
+export type Remoted<
+  T,
+  ProxiedTypes extends Array<unknown> = [],
+  ExcludedTypes extends Array<unknown> = [],
+> = T extends AnyFunction
+  ? (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>>>
+  : T extends ExcludedTypes[number]
+    ? {[K in keyof T]: Remoted<T[K], ProxiedTypes, ExcludedTypes>}
+    : T extends ProxiedTypes[number]
+      ? Proxied<T>
+      : T extends Array<infer U>
+        ? Array<Remoted<U, ProxiedTypes, ExcludedTypes>>
+        : T extends object
+          ? {[K in keyof T]: Remoted<T[K], ProxiedTypes, ExcludedTypes>}
+          : T;
+
+/**
+ * Transforms a class/object type for full proxy access.
+ * Both methods AND properties become async (return Promise<T>).
+ *
+ * Use this when you know you're working with a proxied class instance
+ * and need property access to be correctly typed as async.
+ *
+ * @example
+ * ```ts
+ * class Counter {
+ *   name: string;
+ *   count(): number { ... }
+ * }
+ * // Proxied<Counter> has:
+ * //   name: Promise<string>
+ * //   count: () => Promise<number>
+ * ```
+ */
+export type Proxied<T> = {
+  [K in keyof T]: T[K] extends AnyFunction
+    ? (...args: Parameters<T[K]>) => Promise<Awaited<ReturnType<T[K]>>>
+    : Promise<Awaited<T[K]>>;
 };
 
 /**
@@ -170,6 +338,22 @@ export interface Options {
    * @default false
    */
   debug?: boolean;
+}
+
+/**
+ * Options with autoProxy explicitly set to true.
+ * Used for function overloads that return RemoteAutoProxy<T>.
+ */
+export interface AutoProxyOptions extends Options {
+  autoProxy: true;
+}
+
+/**
+ * Options with autoProxy set to false or omitted (defaults to false).
+ * Used for function overloads that return Remote<T>.
+ */
+export interface ManualOptions extends Options {
+  autoProxy?: false;
 }
 
 /**

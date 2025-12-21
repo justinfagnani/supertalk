@@ -20,8 +20,13 @@ export {isPlainObject, NonCloneableError} from './lib/protocol.js';
 export type {
   Endpoint,
   Remote,
+  RemoteAutoProxy,
+  Remoted,
+  Proxied,
   Message,
   WireValue,
   Options,
+  AutoProxyOptions,
+  ManualOptions,
 } from './lib/types.js';
 export {ROOT_TARGET} from './lib/types.js';

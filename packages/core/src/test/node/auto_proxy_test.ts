@@ -17,6 +17,7 @@ import {suite, test} from 'node:test';
 import * as assert from 'node:assert';
 import {setupService} from './test-utils.js';
 import {NonCloneableError} from '../../index.js';
+import type {Remoted} from '../../index.js';
 
 // A class instance for testing (not a plain object)
 class Counter {
@@ -51,8 +52,10 @@ void suite('manual mode (autoProxy: false)', () => {
         },
       });
 
+      // Remote<T> uses Remoted<R> for return types, so greeter is correctly
+      // typed as () => Promise<string>
       const greeter = await ctx.remote.getGreeter();
-      const result = await (greeter as unknown as () => Promise<string>)();
+      const result = await greeter();
       assert.strictEqual(result, 'hello from remote');
     });
 
@@ -60,19 +63,20 @@ void suite('manual mode (autoProxy: false)', () => {
       using ctx = setupService({
         // When the counter is passed, it becomes a proxy on this side.
         // Proxy methods return promises, so we must await them.
-        async useCounter(counter: Counter): Promise<number> {
+        // We use Remoted<Counter> for the parameter type since we receive
+        // a proxy, not the original counter.
+        async useCounter(counter: Remoted<Counter>): Promise<number> {
           // The counter here is a proxy to the local Counter instance
-          await (
-            counter as unknown as {increment: () => Promise<number>}
-          ).increment();
-          return (
-            counter as unknown as {increment: () => Promise<number>}
-          ).increment();
+          await counter.increment();
+          return counter.increment();
         },
       });
 
       const counter = new Counter();
-      const result = await ctx.remote.useCounter(counter);
+      // Type assertion needed: we pass Counter, service receives Remoted<Counter>
+      const result = await ctx.remote.useCounter(
+        counter as unknown as Remoted<Counter>,
+      );
       // The proxy calls back to our local counter
       assert.strictEqual(result, 2);
       assert.strictEqual(counter.value, 2);
@@ -85,13 +89,10 @@ void suite('manual mode (autoProxy: false)', () => {
         },
       });
 
+      // Counter is proxied; Remoted<Counter> makes methods async
       const counter = await ctx.remote.createCounter();
-      // Counter is proxied; methods return promises
-      const typedCounter = counter as unknown as {
-        increment: () => Promise<number>;
-      };
-      assert.strictEqual(await typedCounter.increment(), 1);
-      assert.strictEqual(await typedCounter.increment(), 2);
+      assert.strictEqual(await counter.increment(), 1);
+      assert.strictEqual(await counter.increment(), 2);
     });
   });
 

@@ -6,14 +6,20 @@
 
 import {MessageChannel, type MessagePort} from 'node:worker_threads';
 import {expose, wrap} from '../../index.js';
-import type {Remote, Options} from '../../index.js';
+import type {
+  Remote,
+  RemoteAutoProxy,
+  Options,
+  AutoProxyOptions,
+  ManualOptions,
+} from '../../index.js';
 
 /**
  * A disposable test context that sets up a service and remote proxy over a MessageChannel.
  */
-export interface ServiceContext<T extends object> {
+export interface ServiceContext<R> {
   /** The wrapped remote proxy for calling the service */
-  remote: Remote<T>;
+  remote: R;
   /** The underlying ports (exposed for advanced use cases) */
   port1: MessagePort;
   port2: MessagePort;
@@ -36,8 +42,16 @@ export interface ServiceContext<T extends object> {
  */
 export function setupService<T extends object>(
   service: T,
+  options: AutoProxyOptions,
+): ServiceContext<RemoteAutoProxy<T>>;
+export function setupService<T extends object>(
+  service: T,
+  options?: ManualOptions,
+): ServiceContext<Remote<T>>;
+export function setupService<T extends object>(
+  service: T,
   options: Options = {},
-): ServiceContext<T> {
+): ServiceContext<Remote<T> | RemoteAutoProxy<T>> {
   const {port1, port2} = new MessageChannel();
 
   expose(service, port1, options);
