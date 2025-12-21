@@ -93,6 +93,26 @@ which traverses anyway to convert values.
 - **Signals**: Reactive state synchronization via TC39 Signals
 - **Remote servers**: Extend the model to HTTP/WebSocket RPC (speculative)
 
+## Performance
+
+Benchmarks comparing supertalk to Comlink on Node.js worker threads
+(MessageChannel). Results vary by environment; these are representative.
+
+| Scenario                | supertalk vs Comlink | autoProxy overhead |
+| ----------------------- | -------------------- | ------------------ |
+| Simple string echo      | ~1.8x faster         | ~1x (none)         |
+| Multiple arguments      | ~2x faster           | ~1x (none)         |
+| Large object (~10KB)    | ~1.1x faster         | ~0.5x (traversal)  |
+| Large array (10k items) | ~1x (same)           | ~0.6x (traversal)  |
+| Callbacks               | ~1x (same)           | ~1x (none)         |
+
+**Notes:**
+
+- "autoProxy overhead" shows the cost of `{autoProxy: true}` vs default mode
+- For primitives, autoProxy adds no overhead (no traversal needed)
+- For complex objects/arrays, autoProxy traverses to find nested functions, which adds cost
+- Run benchmarks yourself: `npm run bench -w @supertalk/core`
+
 ## Quick Start
 
 ```ts

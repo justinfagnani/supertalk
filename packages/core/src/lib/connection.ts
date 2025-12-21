@@ -352,7 +352,11 @@ export class Connection {
       }
     }
 
-    // Raw value - may contain nested markers
+    // Raw value - may contain nested markers only if autoProxy is enabled
+    // In non-autoProxy mode, we never send nested wire markers, so skip traversal
+    if (!this.#autoProxy) {
+      return wire;
+    }
     return this.#processFromClone(wire);
   }
 

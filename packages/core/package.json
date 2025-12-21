@@ -21,7 +21,8 @@
     "test": "wireit",
     "test:node": "wireit",
     "test:browser": "wireit",
-    "checksize": "wireit"
+    "checksize": "wireit",
+    "bench": "wireit"
   },
   "wireit": {
     "build": {
@@ -35,6 +36,7 @@
         "index.*",
         "lib/**",
         "test/**",
+        "bench/**",
         ".tsbuildinfo"
       ],
       "clean": "if-file-deleted"
@@ -68,6 +70,12 @@
       "dependencies": [
         "build"
       ]
+    },
+    "bench": {
+      "command": "node bench/benchmark.js",
+      "dependencies": [
+        "build"
+      ]
     }
   },
   "keywords": [
@@ -90,6 +98,7 @@
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@rollup/plugin-terser": "^0.4.4",
     "@types/mocha": "^10.0.10",
+    "comlink": "^4.4.2",
     "rollup": "^4.29.1",
     "rollup-plugin-summary": "^3.0.1",
     "typescript": "^5.7.2"

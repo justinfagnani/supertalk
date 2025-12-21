@@ -483,6 +483,48 @@ const result = await api.doSomething();
 
 ---
 
+## Known Issues / To Investigate
+
+### ArrayBuffer and other built-in types are proxied instead of cloned
+
+**Problem**: `ArrayBuffer`, `TypedArray`, `Date`, `RegExp`, `Map`, `Set`, etc. are
+all structured-clone-compatible, but supertalk proxies them because they're not
+"plain objects" (their prototype isn't `Object.prototype`).
+
+**Impact**: Sending an ArrayBuffer creates a proxy and requires an extra round-trip
+for each property access, instead of cloning the buffer directly.
+
+**Fix needed**: Add checks in `toWireValue` for structured-clone-compatible built-in
+types and pass them through directly instead of proxying.
+
+**Related**: Binary data benchmark is disabled until this is fixed.
+
+---
+
+### ✅ RESOLVED: Benchmark anomaly where autoProxy appeared faster
+
+**Observed**: In microbenchmarks, `{autoProxy: true}` connections sometimes showed
+10-20% higher ops/sec than non-autoProxy connections for simple string operations.
+
+**Root cause**: Benchmark harness overhead. When measuring single RPC calls per
+iteration, the `performance.now()` calls and loop overhead were significant relative
+to the actual work, and JIT/GC effects between iterations dominated the results.
+
+**Fix**: Batch multiple RPC calls per iteration (`CALLS_PER_ITERATION = 10`). This
+reduces harness overhead relative to actual work and spreads JIT/GC impact across
+more calls, giving stable measurements.
+
+**Results after fix**:
+
+- Simple operations (string, numbers, binary): auto/st ratio ≈ 1.0x (identical, as expected)
+- Large objects: auto/st ratio ≈ 0.59x (autoProxy slower due to traversal)
+- Large arrays: auto/st ratio ≈ 0.66x (autoProxy slower due to traversal)
+
+This matches expectations: autoProxy has no overhead for primitives, but must
+traverse complex structures looking for functions to proxy.
+
+---
+
 ## Status Legend
 
 - [ ] Not started
