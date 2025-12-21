@@ -21,7 +21,6 @@ import {
   deserializeError,
   NonCloneableError,
 } from './protocol.js';
-import {SourceRegistry, ProxyRegistry} from './proxy-registry.js';
 
 /**
  * Pending call waiting for a response.
@@ -81,10 +80,15 @@ export class Connection {
   #debug: boolean;
 
   // Registry for local objects we expose to remote (strong refs)
-  #localObjects = new SourceRegistry();
+  // ID counter for local objects (remote IDs come from the wire)
+  #nextLocalId = 1;
+  #localById = new Map<number, object>();
+  #localByObject = new WeakMap<object, number>();
 
-  // Registry for proxies to remote objects (weak refs with release notification)
-  #remoteProxies: ProxyRegistry;
+  // Registry for proxies to remote objects (weak refs)
+  #remoteById = new Map<number, WeakRef<object>>();
+  #remoteByProxy = new WeakMap<object, number>();
+  #remoteCleanup: FinalizationRegistry<number>;
 
   // Pending RPC calls awaiting response
   #nextCallId = 1;
@@ -102,8 +106,9 @@ export class Connection {
     this.#autoProxy = options.autoProxy ?? false;
     this.#debug = options.debug ?? false;
 
-    // Set up remote proxy registry with release notification
-    this.#remoteProxies = new ProxyRegistry((proxyId) => {
+    // Set up finalization registry to notify remote when proxies are GC'd
+    this.#remoteCleanup = new FinalizationRegistry((proxyId: number) => {
+      this.#remoteById.delete(proxyId);
       endpoint.postMessage({type: 'release', proxyId});
     });
 
@@ -116,7 +121,7 @@ export class Connection {
    * Expose an object at a target ID. Use ROOT_TARGET for the root service.
    */
   expose(target: number, obj: object): void {
-    this.#localObjects.register(obj, target);
+    this.#registerLocal(obj, target);
   }
 
   /**
@@ -131,6 +136,70 @@ export class Connection {
    */
   close(): void {
     this.#endpoint.removeEventListener('message', this.#handleMessage);
+  }
+
+  // ============================================================
+  // Local object registry (strong refs, we expose to remote)
+  // ============================================================
+
+  /**
+   * Register a local object and return its ID.
+   * If explicitId is provided, use that instead of generating one.
+   */
+  #registerLocal(obj: object, explicitId?: number): number {
+    const existing = this.#localByObject.get(obj);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const id = explicitId ?? this.#nextLocalId++;
+    this.#localById.set(id, obj);
+    this.#localByObject.set(obj, id);
+    return id;
+  }
+
+  /**
+   * Get a local object by its ID.
+   */
+  #getLocal(id: number): object | undefined {
+    return this.#localById.get(id);
+  }
+
+  /**
+   * Release a local object by its ID.
+   */
+  #releaseLocal(id: number): void {
+    const obj = this.#localById.get(id);
+    if (obj !== undefined) {
+      this.#localById.delete(id);
+      this.#localByObject.delete(obj);
+    }
+  }
+
+  // ============================================================
+  // Remote proxy registry (weak refs, proxies to remote objects)
+  // ============================================================
+
+  /**
+   * Store a proxy for a remote object ID.
+   */
+  #setRemote(proxyId: number, proxy: object): void {
+    this.#remoteById.set(proxyId, new WeakRef(proxy));
+    this.#remoteByProxy.set(proxy, proxyId);
+    this.#remoteCleanup.register(proxy, proxyId);
+  }
+
+  /**
+   * Get the proxy for a remote object ID, if still alive.
+   */
+  #getRemote(proxyId: number): object | undefined {
+    return this.#remoteById.get(proxyId)?.deref();
+  }
+
+  /**
+   * Get the remote ID for a proxy, if it exists.
+   */
+  #getRemoteId(proxy: object): number | undefined {
+    return this.#remoteByProxy.get(proxy);
   }
 
   // ============================================================
@@ -153,11 +222,11 @@ export class Connection {
 
     // Functions are always proxied at top level
     if (typeof value === 'function') {
-      const existingId = this.#remoteProxies.getId(value as object);
+      const existingId = this.#getRemoteId(value as object);
       if (existingId !== undefined) {
         return {type: 'proxy', proxyId: existingId};
       }
-      const proxyId = this.#localObjects.register(value as object);
+      const proxyId = this.#registerLocal(value as object);
       return {type: 'proxy', proxyId};
     }
 
@@ -167,7 +236,7 @@ export class Connection {
     }
 
     // Check if this is a proxy we received from remote - send back original ID
-    const existingId = this.#remoteProxies.getId(value);
+    const existingId = this.#getRemoteId(value);
     if (existingId !== undefined) {
       return {type: 'proxy', proxyId: existingId};
     }
@@ -205,7 +274,7 @@ export class Connection {
     }
 
     // Class instances: proxy the whole thing
-    const proxyId = this.#localObjects.register(value);
+    const proxyId = this.#registerLocal(value);
     return {type: 'proxy', proxyId};
   }
 
@@ -217,11 +286,11 @@ export class Connection {
       if (!this.#autoProxy) {
         throw new NonCloneableError('function', path);
       }
-      const existingId = this.#remoteProxies.getId(value as object);
+      const existingId = this.#getRemoteId(value as object);
       if (existingId !== undefined) {
         return {__supertalk_proxy__: existingId};
       }
-      const proxyId = this.#localObjects.register(value as object);
+      const proxyId = this.#registerLocal(value as object);
       return {__supertalk_proxy__: proxyId};
     }
 
@@ -229,7 +298,7 @@ export class Connection {
       return value;
     }
 
-    const existingId = this.#remoteProxies.getId(value);
+    const existingId = this.#getRemoteId(value);
     if (existingId !== undefined) {
       return {__supertalk_proxy__: existingId};
     }
@@ -263,7 +332,7 @@ export class Connection {
     if (!this.#autoProxy) {
       throw new NonCloneableError('class-instance', path);
     }
-    const proxyId = this.#localObjects.register(value);
+    const proxyId = this.#registerLocal(value);
     return {__supertalk_proxy__: proxyId};
   }
 
@@ -277,8 +346,7 @@ export class Connection {
   fromWireValue(wire: WireValue): unknown {
     if (wire.type === 'proxy') {
       const existing =
-        this.#localObjects.get(wire.proxyId) ??
-        this.#remoteProxies.get(wire.proxyId);
+        this.#getLocal(wire.proxyId) ?? this.#getRemote(wire.proxyId);
       if (existing) {
         return existing;
       }
@@ -311,8 +379,7 @@ export class Connection {
 
     if (isProxyMarker(value)) {
       const proxyId = value.__supertalk_proxy__;
-      const existing =
-        this.#localObjects.get(proxyId) ?? this.#remoteProxies.get(proxyId);
+      const existing = this.#getLocal(proxyId) ?? this.#getRemote(proxyId);
       if (existing) {
         return existing;
       }
@@ -382,7 +449,7 @@ export class Connection {
    * Create a proxy for a remote object.
    */
   #createRemoteProxy(proxyId: number): object {
-    const existing = this.#remoteProxies.get(proxyId);
+    const existing = this.#getRemote(proxyId);
     if (existing) {
       return existing;
     }
@@ -406,7 +473,7 @@ export class Connection {
       },
     });
 
-    this.#remoteProxies.set(proxyId, proxy);
+    this.#setRemote(proxyId, proxy);
     return proxy;
   }
 
@@ -441,7 +508,7 @@ export class Connection {
    * Resolve a proxy property by looking up the local target.
    */
   #resolveProxyProperty(targetProxyId: number, property: string): unknown {
-    const target = this.#localObjects.get(targetProxyId);
+    const target = this.#getLocal(targetProxyId);
     if (!target) {
       throw new ReferenceError(
         `Proxy property target ${String(targetProxyId)} not found`,
@@ -507,7 +574,7 @@ export class Connection {
 
     switch (message.type) {
       case 'release':
-        this.#localObjects.release(message.proxyId);
+        this.#releaseLocal(message.proxyId);
         break;
       case 'promise-resolve': {
         const pending = this.#pendingRemotePromises.get(message.promiseId);
@@ -569,7 +636,7 @@ export class Connection {
     const deserializedArgs = args.map((arg) => this.fromWireValue(arg));
 
     // Look up the target object
-    const proxyTarget = this.#localObjects.get(target);
+    const proxyTarget = this.#getLocal(target);
     if (!proxyTarget) {
       this.#endpoint.postMessage({
         type: 'throw',
