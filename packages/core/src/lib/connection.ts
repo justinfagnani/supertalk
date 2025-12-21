@@ -12,7 +12,14 @@ import type {
   Options,
   ProxyPropertyMetadata,
 } from './types.js';
-import {PROXY_PROPERTY_BRAND} from './types.js';
+import {
+  PROXY_PROPERTY_BRAND,
+  WIRE_TYPE,
+  isWireProxy,
+  isWirePromise,
+  isWireProxyProperty,
+  isWireThrown,
+} from './types.js';
 import {
   isProxyProperty,
   isPromise,
@@ -28,29 +35,6 @@ import {
 interface PendingCall {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
-}
-
-// Marker type guards for nested values
-function isProxyMarker(value: unknown): value is {__supertalk_proxy__: number} {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    '__supertalk_proxy__' in value &&
-    typeof (value as {__supertalk_proxy__: unknown}).__supertalk_proxy__ ===
-      'number'
-  );
-}
-
-function isPromiseMarker(
-  value: unknown,
-): value is {__supertalk_promise__: number} {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    '__supertalk_promise__' in value &&
-    typeof (value as {__supertalk_promise__: unknown}).__supertalk_promise__ ===
-      'number'
-  );
 }
 
 /**
@@ -214,7 +198,7 @@ export class Connection {
     if (isProxyProperty(value)) {
       const metadata = value[PROXY_PROPERTY_BRAND];
       return {
-        type: 'proxy-property',
+        [WIRE_TYPE]: 'proxy-property',
         targetProxyId: metadata.targetProxyId,
         property: metadata.property,
       };
@@ -224,38 +208,37 @@ export class Connection {
     if (typeof value === 'function') {
       const existingId = this.#getRemoteId(value as object);
       if (existingId !== undefined) {
-        return {type: 'proxy', proxyId: existingId};
+        return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
       }
       const proxyId = this.#registerLocal(value as object);
-      return {type: 'proxy', proxyId};
+      return {[WIRE_TYPE]: 'proxy', proxyId};
     }
 
-    // Null and primitives are raw
+    // Null and primitives are sent directly
     if (value === null || typeof value !== 'object') {
-      return {type: 'raw', value};
+      return value;
     }
 
     // Check if this is a proxy we received from remote - send back original ID
     const existingId = this.#getRemoteId(value);
     if (existingId !== undefined) {
-      return {type: 'proxy', proxyId: existingId};
+      return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
     }
 
     // Promises get special handling
     if (isPromise(value)) {
       const promiseId = this.#registerPromise(value);
-      return {type: 'promise', promiseId};
+      return {[WIRE_TYPE]: 'promise', promiseId};
     }
 
     // Arrays: only traverse if autoProxy or debug is enabled
     if (Array.isArray(value)) {
       if (this.#autoProxy || this.#debug) {
-        const processed = value.map((item, index) =>
+        return value.map((item, index) =>
           this.#processForClone(item, `[${String(index)}]`),
         );
-        return {type: 'raw', value: processed};
       }
-      return {type: 'raw', value};
+      return value;
     }
 
     // Plain objects: only traverse if autoProxy or debug is enabled
@@ -268,14 +251,14 @@ export class Connection {
             key,
           );
         }
-        return {type: 'raw', value: processed};
+        return processed;
       }
-      return {type: 'raw', value};
+      return value;
     }
 
     // Class instances: proxy the whole thing
     const proxyId = this.#registerLocal(value);
-    return {type: 'proxy', proxyId};
+    return {[WIRE_TYPE]: 'proxy', proxyId};
   }
 
   /**
@@ -288,10 +271,10 @@ export class Connection {
       }
       const existingId = this.#getRemoteId(value as object);
       if (existingId !== undefined) {
-        return {__supertalk_proxy__: existingId};
+        return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
       }
       const proxyId = this.#registerLocal(value as object);
-      return {__supertalk_proxy__: proxyId};
+      return {[WIRE_TYPE]: 'proxy', proxyId};
     }
 
     if (value === null || typeof value !== 'object') {
@@ -300,7 +283,7 @@ export class Connection {
 
     const existingId = this.#getRemoteId(value);
     if (existingId !== undefined) {
-      return {__supertalk_proxy__: existingId};
+      return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
     }
 
     if (isPromise(value)) {
@@ -308,7 +291,7 @@ export class Connection {
         throw new NonCloneableError('promise', path);
       }
       const promiseId = this.#registerPromise(value);
-      return {__supertalk_promise__: promiseId};
+      return {[WIRE_TYPE]: 'promise', promiseId};
     }
 
     if (Array.isArray(value)) {
@@ -333,7 +316,7 @@ export class Connection {
       throw new NonCloneableError('class-instance', path);
     }
     const proxyId = this.#registerLocal(value);
-    return {__supertalk_proxy__: proxyId};
+    return {[WIRE_TYPE]: 'proxy', proxyId};
   }
 
   // ============================================================
@@ -344,7 +327,7 @@ export class Connection {
    * Deserialize a value from wire format.
    */
   fromWireValue(wire: WireValue): unknown {
-    if (wire.type === 'proxy') {
+    if (isWireProxy(wire)) {
       const existing =
         this.#getLocal(wire.proxyId) ?? this.#getRemote(wire.proxyId);
       if (existing) {
@@ -353,20 +336,20 @@ export class Connection {
       return this.#createRemoteProxy(wire.proxyId);
     }
 
-    if (wire.type === 'promise') {
+    if (isWirePromise(wire)) {
       return this.#createRemotePromise(wire.promiseId);
     }
 
-    if (wire.type === 'proxy-property') {
+    if (isWireProxyProperty(wire)) {
       return this.#resolveProxyProperty(wire.targetProxyId, wire.property);
     }
 
-    if (wire.type === 'thrown') {
+    if (isWireThrown(wire)) {
       throw deserializeError(wire.error);
     }
 
     // Raw value - may contain nested markers
-    return this.#processFromClone(wire.value);
+    return this.#processFromClone(wire);
   }
 
   /**
@@ -377,17 +360,17 @@ export class Connection {
       return value;
     }
 
-    if (isProxyMarker(value)) {
-      const proxyId = value.__supertalk_proxy__;
-      const existing = this.#getLocal(proxyId) ?? this.#getRemote(proxyId);
+    if (isWireProxy(value)) {
+      const existing =
+        this.#getLocal(value.proxyId) ?? this.#getRemote(value.proxyId);
       if (existing) {
         return existing;
       }
-      return this.#createRemoteProxy(proxyId);
+      return this.#createRemoteProxy(value.proxyId);
     }
 
-    if (isPromiseMarker(value)) {
-      return this.#createRemotePromise(value.__supertalk_promise__);
+    if (isWirePromise(value)) {
+      return this.#createRemotePromise(value.promiseId);
     }
 
     if (Array.isArray(value)) {

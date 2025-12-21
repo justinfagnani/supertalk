@@ -4,6 +4,21 @@
  * @packageDocumentation
  */
 
+// ============================================================
+// Wire protocol constants
+// ============================================================
+
+/**
+ * Wire type discriminator property name.
+ * This serves as both a brand and type discriminator - user objects won't
+ * accidentally have `__supertalk_type__: 'proxy'` etc.
+ */
+export const WIRE_TYPE = '__supertalk_type__';
+
+// ============================================================
+// Endpoint interface
+// ============================================================
+
 /**
  * An Endpoint is any object that can send and receive messages.
  * This abstracts over Worker, MessagePort, Window, etc.
@@ -160,17 +175,70 @@ export interface Options {
 /**
  * Wire format for values that may contain proxy references.
  *
- * Raw values (primitives, plain objects, arrays) are sent as-is via structured clone.
- * Functions and class instances are replaced with proxy references.
- * Promises are tracked separately for resolution/rejection.
- * Proxy properties reference a remote proxy's property for direct field access.
+ * Special values (proxies, promises, etc.) are branded with `__supertalk_type__`.
+ * Raw values (primitives, plain objects, arrays) are sent as-is without wrapping.
+ * On receive, we check for the brand - if absent, the value is raw user data.
+ *
+ * This is typed as `unknown` because raw values can be anything. The specific
+ * wire marker types (WireProxy, WirePromise, etc.) are discriminated by WIRE_TYPE.
  */
-export type WireValue =
-  | {type: 'raw'; value: unknown}
-  | {type: 'proxy'; proxyId: number}
-  | {type: 'promise'; promiseId: number}
-  | {type: 'proxy-property'; targetProxyId: number; property: string}
-  | {type: 'thrown'; error: SerializedError};
+export type WireValue = unknown;
+
+export interface WireProxy {
+  [WIRE_TYPE]: 'proxy';
+  proxyId: number;
+}
+
+export interface WirePromise {
+  [WIRE_TYPE]: 'promise';
+  promiseId: number;
+}
+
+export interface WireProxyProperty {
+  [WIRE_TYPE]: 'proxy-property';
+  targetProxyId: number;
+  property: string;
+}
+
+export interface WireThrown {
+  [WIRE_TYPE]: 'thrown';
+  error: SerializedError;
+}
+
+// Type guards for wire values
+export function isWireProxy(value: unknown): value is WireProxy {
+  if (typeof value !== 'object' || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return obj[WIRE_TYPE] === 'proxy' && typeof obj['proxyId'] === 'number';
+}
+
+export function isWirePromise(value: unknown): value is WirePromise {
+  if (typeof value !== 'object' || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return obj[WIRE_TYPE] === 'promise' && typeof obj['promiseId'] === 'number';
+}
+
+export function isWireProxyProperty(
+  value: unknown,
+): value is WireProxyProperty {
+  if (typeof value !== 'object' || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    obj[WIRE_TYPE] === 'proxy-property' &&
+    typeof obj['targetProxyId'] === 'number' &&
+    typeof obj['property'] === 'string'
+  );
+}
+
+export function isWireThrown(value: unknown): value is WireThrown {
+  if (typeof value !== 'object' || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    obj[WIRE_TYPE] === 'thrown' &&
+    typeof obj['error'] === 'object' &&
+    obj['error'] !== null
+  );
+}
 
 /**
  * Symbol used to brand proxy properties so they can be detected when passed
