@@ -57,6 +57,23 @@ It aims to replace [Comlink](https://github.com/GoogleChromeLabs/comlink/) (whic
 - **Test API**: Use `suite()` and `test()`, not `describe()` and `it()`
 - Test files: `test/node/*_test.js`, `test/browser/*_test.js`
 
+### Bundle Size
+
+Keep the library small! Run the size check during development:
+
+```bash
+WIREIT_LOGGER=simple npm run checksize
+```
+
+This uses Rollup + Terser + `rollup-plugin-summary` to show:
+
+- **Size**: Unminified bundle
+- **Minified**: After Terser (private fields are auto-mangled)
+- **Gzipped**: Compressed size
+- **Brotli**: Best-case compressed size
+
+Current target: **~2 kB** brotli-compressed.
+
 ### Source & Build Structure
 
 - **All source under `src/`** — Including tests: `src/test/node/`, `src/test/browser/`

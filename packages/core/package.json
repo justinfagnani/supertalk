@@ -20,7 +20,8 @@
     "build": "wireit",
     "test": "wireit",
     "test:node": "wireit",
-    "test:browser": "wireit"
+    "test:browser": "wireit",
+    "checksize": "wireit"
   },
   "wireit": {
     "build": {
@@ -61,6 +62,12 @@
         "web-test-runner.config.js"
       ],
       "output": []
+    },
+    "checksize": {
+      "command": "rollup -c rollup.config.checksize.js",
+      "dependencies": [
+        "build"
+      ]
     }
   },
   "keywords": [
@@ -80,7 +87,11 @@
     "directory": "packages/core"
   },
   "devDependencies": {
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-terser": "^0.4.4",
     "@types/mocha": "^10.0.10",
+    "rollup": "^4.29.1",
+    "rollup-plugin-summary": "^3.0.1",
     "typescript": "^5.7.2"
   }
 }

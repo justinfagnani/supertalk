@@ -10,6 +10,7 @@
     "test": "wireit",
     "test:node": "wireit",
     "test:browser": "wireit",
+    "checksize": "wireit",
     "lint": "eslint \"packages/*/src/**/*.ts\"",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -35,6 +36,11 @@
     "test:browser": {
       "dependencies": [
         "./packages/core:test:browser"
+      ]
+    },
+    "checksize": {
+      "dependencies": [
+        "./packages/core:checksize"
       ]
     }
   },
