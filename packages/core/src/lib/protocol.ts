@@ -4,18 +4,8 @@
  * @packageDocumentation
  */
 
-import type {
-  CallMessage,
-  ReturnMessage,
-  ThrowMessage,
-  ReleaseMessage,
-  PromiseResolveMessage,
-  PromiseRejectMessage,
-  SerializedError,
-  WireValue,
-  ProxyPropertyMetadata,
-} from './types.js';
-import {ROOT_TARGET, PROXY_PROPERTY_BRAND} from './types.js';
+import type {SerializedError, ProxyPropertyMetadata} from './types.js';
+import {PROXY_PROPERTY_BRAND} from './types.js';
 
 /**
  * Check if a value is a proxy property created by supertalk.
@@ -48,127 +38,6 @@ export function isPlainObject(value: unknown): boolean {
   }
   const proto = Object.getPrototypeOf(value) as unknown;
   return proto === null || proto === Object.prototype;
-}
-
-/**
- * Create a call message for the root service.
- */
-export function createCallMessage(
-  id: number,
-  method: string,
-  args: Array<WireValue>,
-): CallMessage {
-  return {
-    type: 'call',
-    id,
-    target: ROOT_TARGET,
-    action: 'call',
-    method,
-    args,
-  };
-}
-
-/**
- * Create a call message for a proxied target (method call).
- */
-export function createProxyCallMessage(
-  id: number,
-  target: number,
-  method: string | undefined,
-  args: Array<WireValue>,
-): CallMessage {
-  return {
-    type: 'call',
-    id,
-    target,
-    action: 'call',
-    method,
-    args,
-  };
-}
-
-/**
- * Create a get message for a proxied target (property access).
- */
-export function createProxyGetMessage(
-  id: number,
-  target: number,
-  property: string,
-): CallMessage {
-  return {
-    type: 'call',
-    id,
-    target,
-    action: 'get',
-    method: property,
-    args: [],
-  };
-}
-
-/**
- * Create a return message.
- */
-export function createReturnMessage(
-  id: number,
-  value: WireValue,
-): ReturnMessage {
-  return {
-    type: 'return',
-    id,
-    value,
-  };
-}
-
-/**
- * Create a throw message.
- */
-export function createThrowMessage(
-  id: number,
-  error: SerializedError,
-): ThrowMessage {
-  return {
-    type: 'throw',
-    id,
-    error,
-  };
-}
-
-/**
- * Create a release message.
- */
-export function createReleaseMessage(proxyId: number): ReleaseMessage {
-  return {
-    type: 'release',
-    proxyId,
-  };
-}
-
-/**
- * Create a promise resolve message.
- */
-export function createPromiseResolveMessage(
-  promiseId: number,
-  value: WireValue,
-): PromiseResolveMessage {
-  return {
-    type: 'promise-resolve',
-    promiseId,
-    value,
-  };
-}
-
-/**
- * Create a promise reject message.
- */
-export function createPromiseRejectMessage(
-  promiseId: number,
-  error: SerializedError,
-): PromiseRejectMessage {
-  return {
-    type: 'promise-reject',
-    promiseId,
-    error,
-  };
 }
 
 /**
@@ -211,18 +80,13 @@ export class NonCloneableError extends Error {
     public readonly valueType: 'function' | 'class-instance' | 'promise',
     public readonly path: string,
   ) {
-    const typeName =
+    const t =
       valueType === 'function'
         ? 'Function'
         : valueType === 'promise'
           ? 'Promise'
-          : 'Class instance (non-plain object)';
-    super(
-      `${typeName} found at "${path}" cannot be sent across the boundary. ` +
-        `In manual mode (autoProxy: false), only top-level functions, ` +
-        `class instances, and promises are proxied. Enable autoProxy: true ` +
-        `to proxy nested values.`,
-    );
+          : 'class instance';
+    super(`${t} at "${path}" cannot be cloned. Use autoProxy: true.`);
     this.name = 'NonCloneableError';
   }
 }

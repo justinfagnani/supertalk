@@ -206,38 +206,19 @@ export interface WireThrown {
 }
 
 // Type guards for wire values
+// Shared helper casts value to record after null/object check
+type WireRecord = Record<string, unknown>;
+const asWire = (v: unknown): WireRecord | undefined =>
+  typeof v === 'object' && v !== null ? (v as WireRecord) : undefined;
+
 export function isWireProxy(value: unknown): value is WireProxy {
-  if (typeof value !== 'object' || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return obj[WIRE_TYPE] === 'proxy' && typeof obj['proxyId'] === 'number';
+  const w = asWire(value);
+  return w?.[WIRE_TYPE] === 'proxy' && typeof w['proxyId'] === 'number';
 }
 
 export function isWirePromise(value: unknown): value is WirePromise {
-  if (typeof value !== 'object' || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return obj[WIRE_TYPE] === 'promise' && typeof obj['promiseId'] === 'number';
-}
-
-export function isWireProxyProperty(
-  value: unknown,
-): value is WireProxyProperty {
-  if (typeof value !== 'object' || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    obj[WIRE_TYPE] === 'proxy-property' &&
-    typeof obj['targetProxyId'] === 'number' &&
-    typeof obj['property'] === 'string'
-  );
-}
-
-export function isWireThrown(value: unknown): value is WireThrown {
-  if (typeof value !== 'object' || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    obj[WIRE_TYPE] === 'thrown' &&
-    typeof obj['error'] === 'object' &&
-    obj['error'] !== null
-  );
+  const w = asWire(value);
+  return w?.[WIRE_TYPE] === 'promise' && typeof w['promiseId'] === 'number';
 }
 
 /**

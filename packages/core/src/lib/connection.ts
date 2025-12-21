@@ -9,6 +9,8 @@ import type {
   Message,
   CallMessage,
   WireValue,
+  WireProxyProperty,
+  WireThrown,
   Options,
   ProxyPropertyMetadata,
 } from './types.js';
@@ -17,8 +19,6 @@ import {
   WIRE_TYPE,
   isWireProxy,
   isWirePromise,
-  isWireProxyProperty,
-  isWireThrown,
 } from './types.js';
 import {
   isProxyProperty,
@@ -340,12 +340,16 @@ export class Connection {
       return this.#createRemotePromise(wire.promiseId);
     }
 
-    if (isWireProxyProperty(wire)) {
-      return this.#resolveProxyProperty(wire.targetProxyId, wire.property);
-    }
-
-    if (isWireThrown(wire)) {
-      throw deserializeError(wire.error);
+    // Check remaining wire types (only used here, so inlined)
+    if (typeof wire === 'object' && wire !== null) {
+      const w = wire as Record<string, unknown>;
+      if (w[WIRE_TYPE] === 'proxy-property') {
+        const pp = wire as WireProxyProperty;
+        return this.#resolveProxyProperty(pp.targetProxyId, pp.property);
+      }
+      if (w[WIRE_TYPE] === 'thrown') {
+        throw deserializeError((wire as WireThrown).error);
+      }
     }
 
     // Raw value - may contain nested markers
