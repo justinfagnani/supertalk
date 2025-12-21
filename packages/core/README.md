@@ -6,16 +6,35 @@ A type-safe, unified client/server communication library for:
 - Iframes
 - Node.js worker threads
 
+## Overview
+
+Workers are great for offloading work from the main thread, but the raw `postMessage` API leaves you to build everything yourself—request/response correlation, object identity tracking, memory management for remote references, and all the dispatch logic. You lose the ergonomics of normal function calls.
+
+Supertalk handles all of that, letting you **expose rich, high-level APIs across workers** with virtually no boilerplate. Call methods, pass callbacks, await promises, and interact with class instances as if they were local objects:
+
+```ts
+// In your worker
+expose(myService, self);
+
+// From your main thread
+const service = wrap<MyService>(worker);
+const widget = await service.createWidget();
+await widget.onClick(() => console.log('clicked!'));
+```
+
+- **Type-safe** — Your IDE knows exactly what's proxied vs cloned
+- **Ergonomic** — Callbacks, promises, and classes just work
+- **Bidirectional** — The same patterns work in both directions
+- **Fast & small** — ~2 kB brotli-compressed, zero dependencies
+- **Composable** — Nested objects, sub-services, no special cases
+
 ## Installation
 
 ```bash
 npm install @supertalk/core
 ```
 
-## Motivation
-
-Supertalk is inspired by [Comlink](https://github.com/GoogleChromeLabs/comlink),
-but explores a few different design choices:
+## Design Principles
 
 ### Type-Safe Proxying with `proxy()`
 
