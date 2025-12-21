@@ -1,23 +1,24 @@
 /**
- * Tests for autoProxy mode behavior.
+ * Tests for nestedProxies mode behavior.
  *
- * This file tests both manual mode (autoProxy: false, the default) and
- * auto-proxy mode (autoProxy: true).
+ * This file tests both manual mode (nestedProxies: false, the default) and
+ * nested proxy mode (nestedProxies: true).
  *
  * In manual mode:
  * - Top-level functions and class instances are proxied
  * - Nested functions/class instances throw NonCloneableError
  *
- * In auto-proxy mode:
- * - Functions and class instances anywhere in the graph are proxied
+ * In nested proxy mode:
+ * - Functions and promises anywhere in the graph are auto-proxied
+ * - Class instances require explicit proxy() markers
  * - Diamond-shaped object graphs result in the same proxy instance
  */
 
 import {suite, test} from 'node:test';
 import * as assert from 'node:assert';
 import {setupService} from './test-utils.js';
-import {NonCloneableError} from '../../index.js';
-import type {Remoted} from '../../index.js';
+import {NonCloneableError, proxy} from '../../index.js';
+import type {Remoted, LocalProxy} from '../../index.js';
 
 // A class instance for testing (not a plain object)
 class Counter {
@@ -32,7 +33,7 @@ class Counter {
   }
 }
 
-void suite('manual mode (autoProxy: false)', () => {
+void suite('manual mode (nestedProxies: false)', () => {
   void suite('top-level values are proxied', () => {
     void test('top-level function argument is proxied', async () => {
       using ctx = setupService({
@@ -235,7 +236,7 @@ void suite('manual mode (autoProxy: false)', () => {
         (error: Error) => {
           // The error is serialized and deserialized, so it's a plain Error
           assert.ok(error.message.includes('validate'));
-          assert.ok(error.message.includes('autoProxy'));
+          assert.ok(error.message.includes('nestedProxies'));
           return true;
         },
       );
@@ -279,7 +280,7 @@ void suite('manual mode (autoProxy: false)', () => {
           // The error is serialized and deserialized, so it becomes a plain Error
           // with the original message
           assert.ok(error.message.includes('data'));
-          assert.ok(error.message.includes('autoProxy'));
+          assert.ok(error.message.includes('nestedProxies'));
           return true;
         },
       );
@@ -287,7 +288,7 @@ void suite('manual mode (autoProxy: false)', () => {
   });
 });
 
-void suite('auto-proxy mode (autoProxy: true)', () => {
+void suite('nested proxy mode (nestedProxies: true)', () => {
   void suite('nested values are proxied', () => {
     void test('nested function in object argument is proxied', async () => {
       using ctx = setupService(
@@ -296,7 +297,7 @@ void suite('auto-proxy mode (autoProxy: true)', () => {
             return opts.onChange();
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const result = await ctx.remote.processOptions({
@@ -318,7 +319,7 @@ void suite('auto-proxy mode (autoProxy: true)', () => {
             return sum;
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const result = await ctx.remote.callAll([() => 1, () => 2, () => 3]);
@@ -332,7 +333,7 @@ void suite('auto-proxy mode (autoProxy: true)', () => {
             return data.level1.level2.fn();
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const result = await ctx.remote.deepCall({
@@ -341,11 +342,13 @@ void suite('auto-proxy mode (autoProxy: true)', () => {
       assert.strictEqual(result, 'deep callback');
     });
 
-    void test('nested class instance in object argument is proxied', async () => {
+    void test('nested class instance with proxy() marker is proxied', async () => {
       using ctx = setupService(
         {
-          // When the counter is proxied, its methods return promises
-          async useNestedCounter(opts: {counter: Counter}): Promise<number> {
+          // When the counter is wrapped with proxy(), it's proxied and methods return promises
+          async useNestedCounter(opts: {
+            counter: LocalProxy<Counter>;
+          }): Promise<number> {
             const counter = opts.counter as unknown as {
               increment: () => Promise<number>;
             };
@@ -353,11 +356,14 @@ void suite('auto-proxy mode (autoProxy: true)', () => {
             return counter.increment();
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const counter = new Counter();
-      const result = await ctx.remote.useNestedCounter({counter});
+      // Use proxy() to explicitly mark the class instance for proxying
+      const result = await ctx.remote.useNestedCounter({
+        counter: proxy(counter),
+      });
       assert.strictEqual(result, 2);
       assert.strictEqual(counter.value, 2);
     });
@@ -372,7 +378,7 @@ void suite('auto-proxy mode (autoProxy: true)', () => {
             };
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const widget = await ctx.remote.getWidget();
@@ -381,14 +387,15 @@ void suite('auto-proxy mode (autoProxy: true)', () => {
       assert.strictEqual(await activateFn(), 'Button activated!');
     });
 
-    void test('nested class instance in return value is proxied', async () => {
+    void test('nested class instance with proxy() in return value is proxied', async () => {
       using ctx = setupService(
         {
-          getCounterHolder(): {counter: Counter} {
-            return {counter: new Counter()};
+          getCounterHolder(): {counter: LocalProxy<Counter>} {
+            // Use proxy() to explicitly mark the class instance
+            return {counter: proxy(new Counter())};
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const holder = await ctx.remote.getCounterHolder();
@@ -411,7 +418,7 @@ void suite('auto-proxy mode (autoProxy: true)', () => {
             return data.a === data.b;
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       // On the local side, a and b are the same function
@@ -423,20 +430,25 @@ void suite('auto-proxy mode (autoProxy: true)', () => {
       assert.strictEqual(result, true);
     });
 
-    void test('diamond with class instance preserves identity', async () => {
+    void test('diamond with proxy() marker preserves identity', async () => {
       using ctx = setupService(
         {
-          checkIdentity(data: {a: Counter; b: Counter}): boolean {
+          checkIdentity(data: {
+            a: LocalProxy<Counter>;
+            b: LocalProxy<Counter>;
+          }): boolean {
             return data.a === data.b;
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const sharedCounter = new Counter();
+      // Use proxy() to mark the shared counter, and pass the same reference twice
+      const wrapped = proxy(sharedCounter);
       const result = await ctx.remote.checkIdentity({
-        a: sharedCounter,
-        b: sharedCounter,
+        a: wrapped,
+        b: wrapped,
       });
       assert.strictEqual(result, true);
     });
@@ -449,7 +461,7 @@ void suite('auto-proxy mode (autoProxy: true)', () => {
             return {a: shared, b: shared};
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const result = await ctx.remote.getDiamond();
@@ -458,9 +470,9 @@ void suite('auto-proxy mode (autoProxy: true)', () => {
     });
   });
 
-  void suite('promises in auto-proxy mode', () => {
+  void suite('promises in nested proxy mode', () => {
     // Note: Promises are not specially handled yet (that's Phase 6).
-    // In auto-proxy mode, Promise is not a plain object, so it gets proxied.
+    // In nested proxy mode, Promise is not a plain object, so it gets proxied.
     // This test documents current behavior.
     void test('nested promise is proxied (not resolved)', async () => {
       using ctx = setupService(
@@ -469,7 +481,7 @@ void suite('auto-proxy mode (autoProxy: true)', () => {
             return {data: Promise.resolve(42)};
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const result = await ctx.remote.getWithPromise();

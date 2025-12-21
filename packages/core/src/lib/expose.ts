@@ -1,11 +1,14 @@
 /**
  * Expose an object's methods over an endpoint.
  *
- * @packageDocumentation
+ * This is a thin wrapper around Connection that registers the service
+ * as the root target.
+ *
+ * @fileoverview Server-side API for exposing services.
  */
 
 import type {Endpoint, Options} from './types.js';
-import {ROOT_TARGET} from './types.js';
+import {ROOT_TARGET} from './constants.js';
 import {Connection} from './connection.js';
 
 /**

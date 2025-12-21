@@ -139,14 +139,14 @@ void suite('function proxying', () => {
         onComplete: (result: number) => void;
       }
 
-      // Nested functions require autoProxy: true
+      // Nested functions require nestedProxies: true
       using ctx = setupService(
         {
           processWithOptions(options: Options): void {
             options.onComplete(options.value * 2);
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const result = await new Promise<number>((resolve) => {
@@ -164,7 +164,7 @@ void suite('function proxying', () => {
         activate: () => string;
       }
 
-      // Nested functions require autoProxy: true
+      // Nested functions require nestedProxies: true
       using ctx = setupService(
         {
           createWidget(name: string): Widget {
@@ -174,20 +174,20 @@ void suite('function proxying', () => {
             };
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const widget = await ctx.remote.createWidget('Button');
       // Name is cloned (data)
       assert.strictEqual(widget.name, 'Button');
-      // activate is proxied (function) - RemoteAutoProxy transforms it to async
+      // activate is proxied (function) - RemoteNested transforms it to async
       assert.strictEqual(await widget.activate(), 'Button activated!');
     });
   });
 
   void suite('functions nested in arrays', () => {
     void test('callbacks in array argument', async () => {
-      // Nested functions require autoProxy: true
+      // Nested functions require nestedProxies: true
       using ctx = setupService(
         {
           invokeAll(callbacks: Array<() => void>): void {
@@ -196,7 +196,7 @@ void suite('function proxying', () => {
             }
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       let count = 0;
@@ -218,17 +218,17 @@ void suite('function proxying', () => {
     });
 
     void test('functions in returned array', async () => {
-      // Nested functions require autoProxy: true
+      // Nested functions require nestedProxies: true
       using ctx = setupService(
         {
           getOperations(): Array<(n: number) => number> {
             return [(n) => n + 1, (n) => n * 2, (n) => n ** 2];
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
-      // RemoteAutoProxy transforms the array element functions to async
+      // RemoteNested transforms the array element functions to async
       const ops = await ctx.remote.getOperations();
       assert.strictEqual(ops.length, 3);
 

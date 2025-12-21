@@ -102,7 +102,7 @@ Current target: **~2 kB** brotli-compressed.
 
 1. **Ask clarifying questions** if requirements are ambiguous
 2. **Check existing documentation** in `docs/` for context
-3. **Review this file's Memory section** for recorded decisions
+3. **Review this file** for design decisions and tips
 
 ### During Implementation
 
@@ -111,125 +111,85 @@ Current target: **~2 kB** brotli-compressed.
 3. **Check in frequently** — Pause after significant progress to confirm direction
 4. **Write tests** — Prefer test-first for complex logic
 
-### Recording Decisions
+### Maintaining This File
 
-When you make or discover important decisions, record them in the Memory section below. Include:
+Keep AGENTS.md as a **living document** — a current snapshot of key instructions, not a changelog.
 
-- The decision or discovery
-- Brief rationale
-- Date
+When you discover something worth recording (coding patterns, implementation details, debugging tips):
 
-### Memory Format
-
-```markdown
-### YYYY-MM-DD: Brief Title
-
-Description of decision/discovery and why it matters.
-```
+- Add it to the appropriate section
+- Organize as if writing documentation, not a log entry
+- No dates or "discovered on..." framing
+- Consolidate related information; avoid duplication
 
 ---
 
-## Memory
+## Key Design Decisions
 
-### 2024-12-17: Initial Project Decisions
+### No Global Configuration
 
-**Module format**: ESM-only, no CommonJS support.
+Unlike Comlink's global `transferHandlers` map, supertalk has no global state. All configuration is scoped to individual connections via options to `expose()` and `wrap()`.
 
-**TypeScript**: ESNext target, standard decorators only (no legacy experimentalDecorators).
+### Explicit `proxy()` for Type-Safe Proxying
 
-**Browser support**: Chrome-only initially; can expand later.
+**What gets auto-proxied (always):**
 
-**Package structure**:
+- Functions (unambiguously non-cloneable)
+- Promises (also non-cloneable)
+- The root service via `expose()`
 
-- `@supertalk/core` — Main implementation
-- `supertalk` — Unscoped re-export package for convenience
+**When to use explicit `proxy()`:**
 
-**Type sharing strategy**: Support multiple patterns:
+- Class instances where you need methods (prototypes are skipped during cloning)
+- Mutable objects where the remote side should see updates
+- Large objects to avoid cloning overhead
 
-1. Shared interface package (recommended for larger projects)
-2. Type-only import of service class (simpler, works for many cases)
-3. Runtime-only (no compile-time types, for dynamic scenarios)
+**Types are accurate:**
 
-Note: Some features may require runtime metadata from decorators, which would necessitate shared abstract classes rather than pure interfaces.
+```ts
+interface MyService {
+  createWidget(): LocalProxy<Widget>; // → RemoteProxy<Widget>
+  getData(): {value: number}; // → { value: number } (cloned)
+}
+```
 
-**Testing**:
+### Proxy Modes
 
-- Node: `node:test` runner
-- Browser: `@web/test-runner` with Playwright
-- Tests run against compiled JS, not TS directly
-- Wireit coordinates build → test dependency
+1. **Shallow mode (default, `nestedProxies: false`)**: Only top-level function arguments are proxied. No traversal. Maximum performance. Nested functions/promises fail with DataCloneError.
 
-**Wireit behavior**: When Wireit skips scripts, it's because:
+2. **Debug mode (`debug: true`)**: Traverses payloads to detect non-cloneable values and throws `NonCloneableError` with the exact path. No actual proxying of nested values.
 
-1. The script already ran and inputs haven't changed (correct caching), OR
-2. There's a configuration error and an input file isn't listed in `files`
+3. **Nested mode (`nestedProxies: true`)**: Full payload traversal. Functions and promises are auto-proxied anywhere. Class instances require explicit `proxy()` markers.
 
-Never manually clear the Wireit cache. If a script isn't running when expected, check that all input files are listed in the `files` array.
+### Services Are Just Proxied Objects
 
-**IMPORTANT**: Wireit handles dependencies automatically. When running tests, do NOT run `build` separately — just run `npm run test:node` and Wireit will build first if needed. The `dependencies` field in wireit config ensures correct ordering.
+A "service" is not a special concept — it's just an object that gets proxied. The same proxy mechanism works for services and any other proxied object:
 
-**CRITICAL - Running Commands**:
-
-- **ALWAYS run from the monorepo root** (`/Users/justin/Projects/Web/supertalk`)
-- **NEVER cd into package directories** to run scripts
-- Use `npm run <script>` for root scripts: `npm run test`, `npm run test:node`, `npm run lint`
-- Use `npm run -w @supertalk/core <script>` to run a script in a specific workspace
-- This ensures Wireit properly coordinates dependencies across packages
-
-**Code generation**: Avoid if possible, but remain open if type inference proves insufficient.
-
-### 2024-12-17: Services Are Just Proxied Objects
-
-**Key insight**: A "service" is not a special concept — it's just an object that gets proxied and sent across the communication boundary. The only differences from other proxied objects are:
-
-1. It's usually a singleton
-2. It's often the "root" object of a connection (unnamed)
-
-This means `expose(service)` is conceptually `send(proxy(service))`. There's an implicit "root connection handler" that manages handshakes and the initial service exposure.
-
-**Implications**:
-
-- The same proxy mechanism works for services and any other proxied object
-- Methods are just non-serializable function properties that get proxied
+- Methods are non-serializable function properties that get proxied
 - Serializable properties get cloned/sent
 - No special cases for "top-level" vs nested objects
 
-**Method enumeration**:
+**Method enumeration:**
 
 - For plain objects: own enumerable properties
 - For class instances: walk prototype chain up to (but not including) Object.prototype
 
-### 2024-12-19: No Global Configuration
+---
 
-**Design principle**: Unlike Comlink's global `transferHandlers` map, supertalk has no global state. All configuration is scoped to individual connections via options to `expose()` and `wrap()`.
+## Wireit & Commands
 
-**Comlink's global state**:
+**CRITICAL**: Always run commands from the monorepo root (`/Users/justin/Projects/Web/supertalk`), never cd into package directories.
 
-- `Comlink.transferHandlers` — must be configured identically on both sides
-- Creates coupling between unrelated connections
-- Makes testing harder (global state persists between tests)
+```bash
+npm run test          # All tests
+npm run test:node     # Node tests only
+npm run lint          # Lint
+npm run -w @supertalk/core <script>  # Run in specific workspace
+```
 
-**supertalk approach**:
+Wireit handles dependencies automatically — don't run `build` separately before tests.
 
-- Configuration via options: `wrap(endpoint, { autoProxy: true })`
-- Each connection is isolated
-- Easier to test and reason about
-
-### 2024-12-19: Auto-Proxy Mode Design
-
-**Problem**: Automatically traversing payloads to detect functions/proxies has cost and may not always be desired.
-
-**Decision**: Auto-proxy is opt-in (default off). The three modes are:
-
-1. **Manual mode (default)**: Only top-level args and return values are considered for proxying. Nested functions fail to clone (browser's DataCloneError). Simple, predictable, no traversal overhead.
-
-2. **Debug mode (opt-in)**: Traverses payloads to detect non-cloneable values and throws `NonCloneableError` with the exact path. Useful for development when debugging DataCloneError is frustrating.
-
-3. **Auto-proxy mode (opt-in)**: Full payload traversal. Functions and non-plain objects anywhere in the graph are proxied. Diamond patterns result in the same proxy instance.
-
-**Why debug mode**: Comlink users often struggle with `DataCloneError` because the browser doesn't say _where_ in the data the problem is. Debug mode solves this without the full cost of auto-proxying.
-
-**Rationale for abandoning transfer-list pattern**: Considered a postMessage-style transfer list for explicit nested proxies, but replacing proxy markers with actual Proxy objects requires knowing paths, and functions can't be markers. Simpler to just have three clear modes.
+**Debugging tip**: If a script isn't running when expected, check that all input files are listed in the `files` array in the wireit config. Never manually clear the Wireit cache.
 
 ---
 
@@ -259,27 +219,11 @@ supertalk/
 └── package.json        # Workspace root
 ```
 
-## Key Files to Know
+## Key Files
 
-| File                   | Purpose                                   |
-| ---------------------- | ----------------------------------------- |
-| `docs/GOALS.md`        | Full requirements and non-goals           |
-| `docs/API-DESIGN.md`   | API exploration and decisions             |
-| `docs/ARCHITECTURE.md` | Internal system design                    |
-| `docs/ROADMAP.md`      | Implementation phases and status          |
-| `AGENTS.md`            | This file — agent instructions and memory |
-
-## Questions to Ask Yourself
-
-Before implementing a feature:
-
-1. Is this documented in `docs/`?
-2. Does this match the API design in `API-DESIGN.md`?
-3. Are there recorded decisions in Memory that affect this?
-4. Should I check in with the user before proceeding?
-
-When stuck:
-
-1. Have I read the relevant research (Comlink, tRPC patterns)?
-2. Is there a simpler approach that achieves the same goal?
-3. Should I ask the user for clarification?
+| File                   | Purpose                          |
+| ---------------------- | -------------------------------- |
+| `docs/GOALS.md`        | Full requirements and non-goals  |
+| `docs/API-DESIGN.md`   | API exploration and decisions    |
+| `docs/ARCHITECTURE.md` | Internal system design           |
+| `docs/ROADMAP.md`      | Implementation phases and status |

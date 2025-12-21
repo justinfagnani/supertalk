@@ -1,7 +1,5 @@
 /**
  * Tests for wire value serialization edge cases.
- *
- * @packageDocumentation
  */
 
 import {suite, test} from 'node:test';

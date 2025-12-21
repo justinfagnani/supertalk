@@ -1,11 +1,81 @@
 /**
- * Message protocol utilities.
+ * Wire protocol utilities and runtime helpers.
  *
- * @packageDocumentation
+ * This file contains:
+ * - `proxy()` function for explicit proxy marking
+ * - Detection helpers (isPromise, isPlainObject, isLocalProxy, etc.)
+ * - Error serialization/deserialization
+ * - NonCloneableError for debug mode
+ *
+ * Constants live in constants.ts. Type definitions live in types.ts.
+ *
+ * @fileoverview Runtime utilities for the wire protocol.
  */
 
-import type {SerializedError, ProxyPropertyMetadata} from './types.js';
-import {PROXY_PROPERTY_BRAND} from './types.js';
+import type {
+  SerializedError,
+  ProxyPropertyMetadata,
+  LocalProxy,
+} from './types.js';
+import {LOCAL_PROXY, PROXY_PROPERTY_BRAND} from './constants.js';
+
+// ============================================================
+// Proxy marker
+// ============================================================
+
+/**
+ * Creates a LocalProxy marker for explicit proxying.
+ *
+ * Use this to explicitly mark values that should be proxied rather than cloned.
+ * This is required in nested mode for class instances and objects you want to
+ * keep mutable/shared.
+ *
+ * **When to use `proxy()`:**
+ * - **Mutable objects** — The remote side should see updates
+ * - **Large graphs** — Avoid cloning expensive data structures
+ * - **Class instances with methods** — Preserve the prototype API
+ *
+ * **When NOT to use `proxy()`:**
+ * - Immutable data (cloning is fine, avoids round-trips)
+ * - Small DTOs / config objects
+ * - Anything the remote side will just read once
+ *
+ * @example
+ * ```ts
+ * // Mutable state
+ * createCounter(): LocalProxy<Counter> {
+ *   return proxy(new Counter());  // Mutations visible remotely
+ * }
+ *
+ * // Large graph
+ * getDocument(): LocalProxy<Document> {
+ *   return proxy(this.doc);  // Don't clone the entire tree
+ * }
+ *
+ * // Immutable data — just return it (will be cloned)
+ * getData(): { value: number } {
+ *   return { value: 42 };
+ * }
+ * ```
+ */
+export function proxy<T>(value: T): LocalProxy<T> {
+  return {[LOCAL_PROXY]: true, value};
+}
+
+/**
+ * Check if a value is a LocalProxy marker.
+ */
+export function isLocalProxy(value: unknown): value is LocalProxy<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Object.hasOwn(value, LOCAL_PROXY)
+  );
+}
+
+// ============================================================
+// Detection helpers
+// ============================================================
 
 /**
  * Check if a value is a proxy property created by supertalk.
@@ -73,7 +143,7 @@ export function deserializeError(serialized: SerializedError): Error {
 }
 
 /**
- * Error thrown when a non-cloneable value is encountered in manual mode.
+ * Error thrown when a non-cloneable value is encountered in shallow mode.
  */
 export class NonCloneableError extends Error {
   constructor(
@@ -85,8 +155,12 @@ export class NonCloneableError extends Error {
         ? 'Function'
         : valueType === 'promise'
           ? 'Promise'
-          : 'class instance';
-    super(`${t} at "${path}" cannot be cloned. Use autoProxy: true.`);
+          : 'Class instance';
+    const hint =
+      valueType === 'class-instance'
+        ? 'Use proxy() to wrap it, or use nestedProxies: true for functions/promises.'
+        : 'Use nestedProxies: true to auto-proxy nested functions and promises.';
+    super(`${t} at "${path}" cannot be cloned. ${hint}`);
     this.name = 'NonCloneableError';
   }
 }

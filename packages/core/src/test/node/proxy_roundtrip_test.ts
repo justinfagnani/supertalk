@@ -7,6 +7,8 @@
 import {suite, test} from 'node:test';
 import * as assert from 'node:assert';
 import {setupService} from './test-utils.js';
+import {proxy} from '../../index.js';
+import type {LocalProxy} from '../../index.js';
 
 /**
  * Tests for proxy round-tripping behavior.
@@ -94,7 +96,7 @@ void suite('Proxy round-trip', () => {
             receivedObjects.push(handler);
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       // Get a handler proxy from expose side
@@ -116,7 +118,7 @@ void suite('Proxy round-trip', () => {
       assert.strictEqual(handler0.data, 'handler data');
     });
 
-    void test('deeply nested proxy round-trip with autoProxy', async () => {
+    void test('deeply nested proxy round-trip with nestedProxies', async () => {
       class Inner {
         value = 42;
 
@@ -130,14 +132,15 @@ void suite('Proxy round-trip', () => {
 
       using ctx = setupService(
         {
-          getWrapper(): {inner: Inner} {
-            return {inner: new Inner()};
+          getWrapper(): {inner: LocalProxy<Inner>} {
+            // Use proxy() to explicitly mark the class instance
+            return {inner: proxy(new Inner())};
           },
           receiveInner(inner: Inner): void {
             receivedInners.push(inner);
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       // Get nested structure - inner should be a proxy
@@ -148,8 +151,10 @@ void suite('Proxy round-trip', () => {
       const value = await innerProxy.getValue();
       assert.strictEqual(value, 42);
 
-      // Send the inner proxy back
-      await ctx.remote.receiveInner(innerProxy);
+      // Send the inner proxy back - it will be unwrapped to the original Inner
+      // Cast needed because innerProxy is RemoteProxy<Inner> but the remote
+      // side expects Inner (the proxy gets unwrapped on round-trip)
+      await ctx.remote.receiveInner(innerProxy as unknown as Inner);
 
       // Should receive the original Inner instance
       assert.strictEqual(receivedInners.length, 1);
@@ -201,7 +206,7 @@ void suite('Proxy round-trip', () => {
             return capturedCallback?.();
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       // Set a callback that returns a class instance

@@ -1,27 +1,30 @@
 /**
- * Create a typed proxy for a remote object.
+ * Create a typed proxy for a remote service.
  *
- * @packageDocumentation
+ * This is a thin wrapper around Connection that returns a proxy for
+ * the root target.
+ *
+ * @fileoverview Client-side API for wrapping remote services.
  */
 
 import type {
   Endpoint,
   Remote,
-  RemoteAutoProxy,
+  RemoteNested,
   Options,
-  AutoProxyOptions,
+  NestedProxyOptions,
 } from './types.js';
-import {ROOT_TARGET} from './types.js';
+import {ROOT_TARGET} from './constants.js';
 import {Connection} from './connection.js';
 
 /**
  * Create a typed proxy that forwards method calls to a remote endpoint.
  *
- * The return type depends on the `autoProxy` option:
- * - `{ autoProxy: true }` → `RemoteAutoProxy<T>` (nested functions are async)
- * - `{ autoProxy: false }` or omitted → `Remote<T>` (top-level only)
+ * The return type depends on the `nestedProxies` option:
+ * - `{ nestedProxies: true }` → `RemoteNested<T>` (nested functions are async)
+ * - `{ nestedProxies: false }` or omitted → `Remote<T>` (top-level only)
  *
- * Note: TypeScript can only infer the correct type when `autoProxy` is a
+ * Note: TypeScript can only infer the correct type when `nestedProxies` is a
  * literal (`true` or `false`). If you pass a variable with type `Options`,
  * the return type will be `Remote<T>` (you may need to cast).
  *
@@ -31,8 +34,8 @@ import {Connection} from './connection.js';
  */
 export function wrap<T extends object>(
   endpoint: Endpoint,
-  options: AutoProxyOptions,
-): RemoteAutoProxy<T>;
+  options: NestedProxyOptions,
+): RemoteNested<T>;
 export function wrap<T extends object>(
   endpoint: Endpoint,
   options?: Options,
@@ -40,7 +43,7 @@ export function wrap<T extends object>(
 export function wrap<T extends object>(
   endpoint: Endpoint,
   options: Options = {},
-): Remote<T> | RemoteAutoProxy<T> {
+): Remote<T> | RemoteNested<T> {
   const connection = new Connection(endpoint, options);
   return connection.proxy(ROOT_TARGET) as Remote<T>;
 }

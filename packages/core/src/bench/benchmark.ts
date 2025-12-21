@@ -6,8 +6,6 @@
  * NOTE: Uses CALLS_PER_ITERATION to batch multiple RPC calls per timing measurement.
  * This reduces benchmark harness overhead and gives stable, meaningful results.
  * Without batching, JIT/GC effects dominate and produce misleading variance.
- *
- * @packageDocumentation
  */
 
 import {MessageChannel, type MessagePort} from 'node:worker_threads';

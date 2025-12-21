@@ -1,17 +1,15 @@
 /**
  * Test utilities for supertalk.
- *
- * @packageDocumentation
  */
 
 import {MessageChannel, type MessagePort} from 'node:worker_threads';
 import {expose, wrap} from '../../index.js';
 import type {
   Remote,
-  RemoteAutoProxy,
+  RemoteNested,
   Options,
-  AutoProxyOptions,
-  ManualOptions,
+  NestedProxyOptions,
+  ShallowOptions,
 } from '../../index.js';
 
 /**
@@ -42,16 +40,16 @@ export interface ServiceContext<R> {
  */
 export function setupService<T extends object>(
   service: T,
-  options: AutoProxyOptions,
-): ServiceContext<RemoteAutoProxy<T>>;
+  options: NestedProxyOptions,
+): ServiceContext<RemoteNested<T>>;
 export function setupService<T extends object>(
   service: T,
-  options?: ManualOptions,
+  options?: ShallowOptions,
 ): ServiceContext<Remote<T>>;
 export function setupService<T extends object>(
   service: T,
   options: Options = {},
-): ServiceContext<Remote<T> | RemoteAutoProxy<T>> {
+): ServiceContext<Remote<T> | RemoteNested<T>> {
   const {port1, port2} = new MessageChannel();
 
   expose(service, port1, options);

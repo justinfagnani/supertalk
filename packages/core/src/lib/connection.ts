@@ -1,7 +1,14 @@
 /**
- * Connection class - unified state and logic for both sides of a supertalk connection.
+ * Connection class - manages state and communication for both sides of a
+ * supertalk connection.
  *
- * @packageDocumentation
+ * This file contains:
+ * - Connection class with proxy lifecycle management
+ * - Wire value serialization/deserialization (toWireValue/fromWireValue)
+ * - Message handling and dispatch
+ * - Proxy creation and release tracking
+ *
+ * @fileoverview Core connection implementation.
  */
 
 import type {
@@ -14,13 +21,10 @@ import type {
   Options,
   ProxyPropertyMetadata,
 } from './types.js';
+import {isWireProxy, isWirePromise} from './types.js';
+import {PROXY_PROPERTY_BRAND, WIRE_TYPE, LOCAL_PROXY} from './constants.js';
 import {
-  PROXY_PROPERTY_BRAND,
-  WIRE_TYPE,
-  isWireProxy,
-  isWirePromise,
-} from './types.js';
-import {
+  isLocalProxy,
   isProxyProperty,
   isPromise,
   isPlainObject,
@@ -60,7 +64,7 @@ interface ProxyProperty {
  */
 export class Connection {
   #endpoint: Endpoint;
-  #autoProxy: boolean;
+  #nestedProxies: boolean;
   #debug: boolean;
 
   // Registry for local objects we expose to remote (strong refs)
@@ -87,7 +91,7 @@ export class Connection {
 
   constructor(endpoint: Endpoint, options: Options = {}) {
     this.#endpoint = endpoint;
-    this.#autoProxy = options.autoProxy ?? false;
+    this.#nestedProxies = options.nestedProxies ?? false;
     this.#debug = options.debug ?? false;
 
     // Set up finalization registry to notify remote when proxies are GC'd
@@ -204,6 +208,17 @@ export class Connection {
       };
     }
 
+    // LocalProxy markers are explicitly proxied
+    if (isLocalProxy(value)) {
+      const obj = value.value as object;
+      const existingId = this.#getRemoteId(obj);
+      if (existingId !== undefined) {
+        return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
+      }
+      const proxyId = this.#registerLocal(obj);
+      return {[WIRE_TYPE]: 'proxy', proxyId};
+    }
+
     // Functions are always proxied at top level
     if (typeof value === 'function') {
       const existingId = this.#getRemoteId(value as object);
@@ -225,15 +240,15 @@ export class Connection {
       return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
     }
 
-    // Promises get special handling
+    // Promises get special handling at top level
     if (isPromise(value)) {
       const promiseId = this.#registerPromise(value);
       return {[WIRE_TYPE]: 'promise', promiseId};
     }
 
-    // Arrays: only traverse if autoProxy or debug is enabled
+    // Arrays: only traverse if nestedProxies or debug is enabled
     if (Array.isArray(value)) {
-      if (this.#autoProxy || this.#debug) {
+      if (this.#nestedProxies || this.#debug) {
         return value.map((item, index) =>
           this.#processForClone(item, `[${String(index)}]`),
         );
@@ -241,9 +256,9 @@ export class Connection {
       return value;
     }
 
-    // Plain objects: only traverse if autoProxy or debug is enabled
+    // Plain objects: only traverse if nestedProxies or debug is enabled
     if (isPlainObject(value)) {
-      if (this.#autoProxy || this.#debug) {
+      if (this.#nestedProxies || this.#debug) {
         const processed: Record<string, unknown> = {};
         for (const key of Object.keys(value)) {
           processed[key] = this.#processForClone(
@@ -256,17 +271,32 @@ export class Connection {
       return value;
     }
 
-    // Class instances: proxy the whole thing
+    // Class instances in shallow mode: proxy the whole thing
+    // In nested mode, non-plain objects require explicit proxy() marker
     const proxyId = this.#registerLocal(value);
     return {[WIRE_TYPE]: 'proxy', proxyId};
   }
 
   /**
-   * Process a value for inclusion in a cloned structure.
+   * Process a value for inclusion in a cloned structure (nested mode or debug).
+   * In nested mode: auto-proxy functions and promises, honor LocalProxy markers.
+   * In debug mode: throw helpful errors for non-cloneable values.
    */
   #processForClone(value: unknown, path: string): unknown {
+    // LocalProxy markers are explicitly proxied
+    if (isLocalProxy(value)) {
+      const obj = value.value as object;
+      const existingId = this.#getRemoteId(obj);
+      if (existingId !== undefined) {
+        return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
+      }
+      const proxyId = this.#registerLocal(obj);
+      return {[WIRE_TYPE]: 'proxy', proxyId};
+    }
+
+    // Functions are auto-proxied in nested mode
     if (typeof value === 'function') {
-      if (!this.#autoProxy) {
+      if (!this.#nestedProxies) {
         throw new NonCloneableError('function', path);
       }
       const existingId = this.#getRemoteId(value as object);
@@ -286,8 +316,9 @@ export class Connection {
       return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
     }
 
+    // Promises are auto-proxied in nested mode
     if (isPromise(value)) {
-      if (!this.#autoProxy) {
+      if (!this.#nestedProxies) {
         throw new NonCloneableError('promise', path);
       }
       const promiseId = this.#registerPromise(value);
@@ -311,12 +342,10 @@ export class Connection {
       return processed;
     }
 
-    // Class instance nested in a cloned structure
-    if (!this.#autoProxy) {
-      throw new NonCloneableError('class-instance', path);
-    }
-    const proxyId = this.#registerLocal(value);
-    return {[WIRE_TYPE]: 'proxy', proxyId};
+    // Class instance nested in a cloned structure - requires explicit proxy()
+    // In nested mode without proxy(), this is an error (use proxy() explicitly)
+    // In debug mode, we also throw to help the user understand what's wrong
+    throw new NonCloneableError('class-instance', path);
   }
 
   // ============================================================
@@ -352,9 +381,9 @@ export class Connection {
       }
     }
 
-    // Raw value - may contain nested markers only if autoProxy is enabled
-    // In non-autoProxy mode, we never send nested wire markers, so skip traversal
-    if (!this.#autoProxy) {
+    // Raw value - may contain nested markers only if nestedProxies is enabled
+    // In shallow mode, we never send nested wire markers, so skip traversal
+    if (!this.#nestedProxies) {
       return wire;
     }
     return this.#processFromClone(wire);

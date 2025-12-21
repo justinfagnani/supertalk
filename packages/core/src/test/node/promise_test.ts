@@ -47,7 +47,7 @@ void suite('Promise support', () => {
     });
   });
 
-  void suite('Nested promises with autoProxy', () => {
+  void suite('Nested promises with nestedProxies', () => {
     void test('promise in return object property', async () => {
       using ctx = setupService(
         {
@@ -58,7 +58,7 @@ void suite('Promise support', () => {
             };
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const data = await ctx.remote.getData();
@@ -74,7 +74,7 @@ void suite('Promise support', () => {
             return [Promise.resolve(1), Promise.resolve(2), Promise.resolve(3)];
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const arr = await ctx.remote.getArray();
@@ -92,7 +92,7 @@ void suite('Promise support', () => {
             };
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const data = await ctx.remote.getMultiple();
@@ -112,7 +112,7 @@ void suite('Promise support', () => {
             };
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const data = await ctx.remote.getNested();
@@ -129,7 +129,7 @@ void suite('Promise support', () => {
             };
           },
         },
-        {autoProxy: true},
+        {nestedProxies: true},
       );
 
       const result = await ctx.remote.getWithError();
@@ -192,7 +192,7 @@ void suite('Promise support', () => {
             };
           },
         },
-        {autoProxy: false, debug: true},
+        {nestedProxies: false, debug: true},
       );
 
       await assert.rejects(

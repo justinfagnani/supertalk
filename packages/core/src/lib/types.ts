@@ -1,19 +1,17 @@
 /**
  * Core type definitions for supertalk.
  *
- * @packageDocumentation
+ * This file contains:
+ * - Type definitions and interfaces (Endpoint, Options, Message, etc.)
+ * - Type guards for wire value detection
+ *
+ * Constants live in constants.ts. Runtime utilities like `proxy()`, error
+ * classes, and serialization helpers live in protocol.ts.
+ *
+ * @fileoverview Type definitions for the wire protocol.
  */
 
-// ============================================================
-// Wire protocol constants
-// ============================================================
-
-/**
- * Wire type discriminator property name.
- * This serves as both a brand and type discriminator - user objects won't
- * accidentally have `__supertalk_type__: 'proxy'` etc.
- */
-export const WIRE_TYPE = '__supertalk_type__';
+import {WIRE_TYPE, type LOCAL_PROXY} from './constants.js';
 
 // ============================================================
 // Endpoint interface
@@ -38,115 +36,108 @@ export interface Endpoint {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyFunction = (...args: Array<any>) => any;
 
+// ============================================================
+// LocalProxy / RemoteProxy types
+// ============================================================
+
+/**
+ * A value marked for proxying when sent across the wire.
+ *
+ * Use `proxy(value)` to create a LocalProxy. The wrapped value is accessible
+ * via the `.value` property on the sending side.
+ *
+ * When received on the other side, it becomes a `RemoteProxy<T>` where all
+ * property/method access is async.
+ *
+ * @example
+ * ```ts
+ * // Service implementation
+ * const service = {
+ *   createWidget(): LocalProxy<Widget> {
+ *     return proxy(new Widget());
+ *   }
+ * };
+ * ```
+ */
+export interface LocalProxy<T> {
+  readonly [LOCAL_PROXY]: true;
+  readonly value: T;
+}
+
+// proxy() implementation is in protocol.ts
+
+/**
+ * The remote representation of a proxied value.
+ * All property and method access is async.
+ *
+ * This is what you receive when the other side sends a `LocalProxy<T>`.
+ *
+ * @example
+ * ```ts
+ * // If service.createWidget() returns LocalProxy<Widget>,
+ * // the caller receives RemoteProxy<Widget>:
+ * const widget = await remote.createWidget();
+ * await widget.name;        // Property access is async
+ * await widget.activate();  // Method calls are async
+ * ```
+ */
+export type RemoteProxy<T> = {
+  [K in keyof T]: T[K] extends AnyFunction
+    ? (...args: Parameters<T[K]>) => Promise<Awaited<ReturnType<T[K]>>>
+    : Promise<Awaited<T[K]>>;
+};
+
+// ============================================================
+// Remote service types
+// ============================================================
+
 /**
  * Converts a type T to its "remote" version where all methods return Promises.
  *
- * @typeParam T - The service type to transform
- * @typeParam ProxiedTypes - Optional tuple of types that should be treated as
- *   proxied (get `Proxied<T>` treatment with async properties). If omitted,
- *   only functions are transformed to async; object properties stay as-is.
- * @typeParam ExcludedTypes - Optional tuple of types that should NOT be proxied
- *   even if they match something in ProxiedTypes. Useful for plain object types
- *   that happen to structurally match a proxied class.
- *
- * ## Gotchas
- *
- * TypeScript uses structural typing, so it cannot distinguish between a class
- * instance and a plain object with the same shape. If a method can return either:
- *
- * ```ts
- * getWidget(): Widget  // Could be `new WidgetClass()` OR `{ name, activate }`
- * ```
- *
- * And you list `Widget` in ProxiedTypes, plain object returns will be typed
- * incorrectly (as Proxied) even though they're cloned at runtime.
- *
- * **Solutions:**
- * 1. Use distinct types for plain objects vs class instances
- * 2. Use ExcludedTypes to carve out exceptions
- * 3. Only list concrete class types, not interfaces they implement
+ * Use this type for the return value of `wrap()`. Methods become async,
+ * and return values are transformed via `Remoted<T>`.
  *
  * @example
  * ```ts
- * class Counter {
- *   name: string;
- *   increment(): number { ... }
- * }
- *
- * interface Service {
- *   createCounter(): Counter;
+ * interface MyService {
+ *   add(a: number, b: number): number;
+ *   createWidget(): LocalProxy<Widget>;
  *   getData(): { value: number };
  * }
  *
- * // Declare Counter as a proxied type
- * type MyRemote = Remote<Service, [Counter]>;
- *
- * const counter = await remote.createCounter();
- * await counter.name;       // ✓ Promise<string> (proxied)
- * await counter.increment(); // ✓ Promise<number>
- *
- * const data = await remote.getData();
- * data.value; // ✓ number (plain object, not proxied)
- * ```
- *
- * @example
- * ```ts
- * // Using ExcludedTypes to handle structural overlap
- * interface WidgetData { name: string; active: boolean }
- * class Widget { name: string; active: boolean; activate() {} }
- *
- * // WidgetData structurally matches Widget, so exclude it
- * type MyRemote = Remote<Service, [Widget], [WidgetData]>;
+ * const remote = wrap<MyService>(worker);
+ * // Remote<MyService> = {
+ * //   add(a: number, b: number): Promise<number>;
+ * //   createWidget(): Promise<RemoteProxy<Widget>>;
+ * //   getData(): Promise<{ value: number }>;
+ * // }
  * ```
  */
-export type Remote<
-  T,
-  ProxiedTypes extends Array<unknown> = [],
-  ExcludedTypes extends Array<unknown> = [],
-> = {
+export type Remote<T> = {
   [K in keyof T as T[K] extends AnyFunction ? K : never]: T[K] extends (
     ...args: infer A
   ) => infer R
-    ? (...args: A) => Promise<Awaited<Remoted<R, ProxiedTypes, ExcludedTypes>>>
+    ? (...args: A) => Promise<Awaited<Remoted<R>>>
     : never;
 };
 
 /**
- * Converts a type T to its "remote" version with full recursive transformation.
+ * Remote type for nested proxy mode.
  *
- * @typeParam T - The service type to transform
- * @typeParam ProxiedTypes - Optional tuple of types that should be treated as
- *   proxied (get `Proxied<T>` treatment with async properties).
- * @typeParam ExcludedTypes - Optional tuple of types to exclude from proxying.
- *
- * In autoProxy mode:
- * - Top-level methods become async
- * - Nested functions in return values also become async
- * - Types in ProxiedTypes get full proxy treatment (properties async)
- * - Types in ExcludedTypes are NOT proxied even if they match ProxiedTypes
- * - Arguments accept both original types and their remoted versions
- *   (since proxied objects sent back are unwrapped to originals)
+ * Like `Remote<T>`, but arguments also accept remoted versions (for round-trip
+ * proxy handling where a proxy sent back gets unwrapped to the original).
  *
  * @example
  * ```ts
- * interface Service {
- *   createWidget(): { activate: () => string };
- * }
- * // RemoteAutoProxy<Service>.createWidget returns:
- * // Promise<{ activate: () => Promise<string> }>
+ * const remote = wrap<MyService>(worker, { nestedProxies: true });
+ * // RemoteNested<MyService>
  * ```
  */
-export type RemoteAutoProxy<
-  T,
-  ProxiedTypes extends Array<unknown> = [],
-  ExcludedTypes extends Array<unknown> = [],
-> = {
+export type RemoteNested<T> = {
   [K in keyof T as T[K] extends AnyFunction ? K : never]: T[K] extends (
     ...args: infer A
   ) => infer R
-    ? (
-        ...args: RemotedArgs<A, ProxiedTypes, ExcludedTypes>
-      ) => Promise<Awaited<Remoted<R, ProxiedTypes, ExcludedTypes>>>
+    ? (...args: RemotedArgs<A>) => Promise<Awaited<Remoted<R>>>
     : never;
 };
 
@@ -155,75 +146,41 @@ export type RemoteAutoProxy<
  * This handles the round-trip case where a proxied object is passed back
  * and gets unwrapped to the original.
  */
-type RemotedArgs<
-  T extends Array<unknown>,
-  ProxiedTypes extends Array<unknown> = [],
-  ExcludedTypes extends Array<unknown> = [],
-> = {
-  [K in keyof T]: T[K] | Remoted<T[K], ProxiedTypes, ExcludedTypes>;
+type RemotedArgs<T extends Array<unknown>> = {
+  [K in keyof T]: T[K] | Remoted<T[K]>;
 };
 
 /**
- * Recursively transforms a type to make all functions async.
- * Used by Remote and RemoteAutoProxy to transform return values.
+ * Recursively transforms a type for remote access.
  *
- * @typeParam T - The type to transform
- * @typeParam ProxiedTypes - Tuple of types that should be fully proxied
- *   (both methods and properties become async)
- * @typeParam ExcludedTypes - Tuple of types that should NOT be proxied
- *   even if they match ProxiedTypes (takes precedence)
- *
- * - Functions become async: `() => T` → `() => Promise<T>`
- * - Types in ExcludedTypes pass through with only functions transformed
- * - Types in ProxiedTypes become `Proxied<T>` (properties async)
- * - Arrays recurse into elements
- * - Other objects recurse into properties (functions only transformed)
- * - Primitives pass through unchanged
- */
-export type Remoted<
-  T,
-  ProxiedTypes extends Array<unknown> = [],
-  ExcludedTypes extends Array<unknown> = [],
-> = T extends AnyFunction
-  ? (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>>>
-  : T extends ExcludedTypes[number]
-    ? {[K in keyof T]: Remoted<T[K], ProxiedTypes, ExcludedTypes>}
-    : T extends ProxiedTypes[number]
-      ? Proxied<T>
-      : T extends Array<infer U>
-        ? Array<Remoted<U, ProxiedTypes, ExcludedTypes>>
-        : T extends object
-          ? {[K in keyof T]: Remoted<T[K], ProxiedTypes, ExcludedTypes>}
-          : T;
-
-/**
- * Transforms a class/object type for full proxy access.
- * Both methods AND properties become async (return Promise<T>).
- *
- * Use this when you know you're working with a proxied class instance
- * and need property access to be correctly typed as async.
+ * - `LocalProxy<T>` → `RemoteProxy<T>` (explicit proxies)
+ * - Functions → async functions
+ * - Arrays → recurse into elements
+ * - Objects → recurse into properties
+ * - Primitives → unchanged
  *
  * @example
  * ```ts
- * class Counter {
- *   name: string;
- *   count(): number { ... }
- * }
- * // Proxied<Counter> has:
- * //   name: Promise<string>
- * //   count: () => Promise<number>
+ * // LocalProxy transforms to RemoteProxy
+ * type T1 = Remoted<LocalProxy<Widget>>;  // RemoteProxy<Widget>
+ *
+ * // Functions become async
+ * type T2 = Remoted<() => number>;  // () => Promise<number>
+ *
+ * // Objects recurse
+ * type T3 = Remoted<{ fn: () => void }>;  // { fn: () => Promise<void> }
  * ```
  */
-export type Proxied<T> = {
-  [K in keyof T]: T[K] extends AnyFunction
-    ? (...args: Parameters<T[K]>) => Promise<Awaited<ReturnType<T[K]>>>
-    : Promise<Awaited<T[K]>>;
-};
-
-/**
- * Reserved target ID for the root service.
- */
-export const ROOT_TARGET = 0;
+export type Remoted<T> =
+  T extends LocalProxy<infer U>
+    ? RemoteProxy<U>
+    : T extends AnyFunction
+      ? (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>>>
+      : T extends Array<infer U>
+        ? Array<Remoted<U>>
+        : T extends object
+          ? {[K in keyof T]: Remoted<T[K]>}
+          : T;
 
 /**
  * Message types for the wire protocol.
@@ -312,28 +269,28 @@ export interface SerializedError {
  */
 export interface Options {
   /**
-   * Enable automatic proxying of nested functions and class instances.
+   * Enable nested proxy handling.
    *
-   * When `false` (default): Only top-level arguments and return values are
-   * considered for proxying. Nested functions or class instances will fail
-   * with a `DataCloneError` from structured clone. Use `debug: true` for
-   * better error messages.
+   * When `false` (default, "shallow mode"): Only top-level function arguments
+   * are proxied. Functions, promises, or `proxy()` markers nested in objects
+   * will fail with `DataCloneError`. Maximum performance, predictable behavior.
    *
-   * When `true`: Full payload traversal finds functions and class instances
-   * anywhere in the object graph and proxies them automatically.
+   * When `true` ("nested mode"): Full payload traversal on send and receive.
+   * Functions and promises are auto-proxied wherever found. `LocalProxy`
+   * markers created via `proxy()` are converted to wire proxies.
    *
    * @default false
    */
-  autoProxy?: boolean;
+  nestedProxies?: boolean;
 
   /**
    * Enable debug mode for better error messages.
    *
-   * When `true` and `autoProxy` is `false`, performs payload traversal to
+   * When `true` and `nestedProxies` is `false`, performs payload traversal to
    * detect non-cloneable values and throw a helpful `NonCloneableError` with
    * the path to the problematic value (e.g., "options.onChange").
    *
-   * Has no effect when `autoProxy` is `true` (traversal happens anyway).
+   * Has no effect when `nestedProxies` is `true` (traversal happens anyway).
    *
    * @default false
    */
@@ -341,19 +298,19 @@ export interface Options {
 }
 
 /**
- * Options with autoProxy explicitly set to true.
- * Used for function overloads that return RemoteAutoProxy<T>.
+ * Options with nestedProxies explicitly set to true.
+ * Used for function overloads that return RemoteNested<T>.
  */
-export interface AutoProxyOptions extends Options {
-  autoProxy: true;
+export interface NestedProxyOptions extends Options {
+  nestedProxies: true;
 }
 
 /**
- * Options with autoProxy set to false or omitted (defaults to false).
+ * Options with nestedProxies set to false or omitted (defaults to false).
  * Used for function overloads that return Remote<T>.
  */
-export interface ManualOptions extends Options {
-  autoProxy?: false;
+export interface ShallowOptions extends Options {
+  nestedProxies?: false;
 }
 
 /**
@@ -404,12 +361,6 @@ export function isWirePromise(value: unknown): value is WirePromise {
   const w = asWire(value);
   return w?.[WIRE_TYPE] === 'promise' && typeof w['promiseId'] === 'number';
 }
-
-/**
- * Symbol used to brand proxy properties so they can be detected when passed
- * as arguments. The value contains the target proxy ID and property name.
- */
-export const PROXY_PROPERTY_BRAND = Symbol('supertalk.proxyProperty');
 
 /**
  * Metadata stored on proxy properties for detection and serialization.

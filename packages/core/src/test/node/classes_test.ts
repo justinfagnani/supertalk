@@ -10,9 +10,9 @@
 import {suite, test} from 'node:test';
 import * as assert from 'node:assert';
 import {setupService} from './test-utils.js';
-import type {Proxied, Remote} from '../../index.js';
+import type {RemoteProxy, LocalProxy} from '../../index.js';
 import {MessageChannel} from 'node:worker_threads';
-import {expose, wrap} from '../../index.js';
+import {expose, wrap, proxy} from '../../index.js';
 
 class Counter {
   #count = 0;
@@ -113,10 +113,10 @@ void suite('class instance proxying', () => {
       });
 
       // Remoted<Counter> makes methods async, but properties stay as-is
-      // For property access on proxied classes, use Proxied<T>
+      // For property access on proxied classes, use RemoteProxy<T>
       const counter = (await ctx.remote.createCounter(
         'myCounter',
-      )) as unknown as Proxied<Counter>;
+      )) as unknown as RemoteProxy<Counter>;
       // Now property access is correctly typed as Promise<string>
       assert.strictEqual(await counter.name, 'myCounter');
     });
@@ -128,11 +128,11 @@ void suite('class instance proxying', () => {
         },
       });
 
-      // Proxied<T> makes both methods and properties async
+      // RemoteProxy<T> makes both methods and properties async
       const counter = (await ctx.remote.createCounter(
         'test',
         42,
-      )) as unknown as Proxied<Counter>;
+      )) as unknown as RemoteProxy<Counter>;
       // Getter access is correctly typed as Promise<number>
       assert.strictEqual(await counter.count, 42);
     });
@@ -169,8 +169,8 @@ void suite('class instance proxying', () => {
 
       const db = await ctx.remote.getDatabase();
       const posts = await db.collection('posts');
-      // Property access on proxied class needs Proxied<T>
-      const proxiedPosts = posts as unknown as Proxied<Collection>;
+      // Property access on proxied class needs RemoteProxy<T>
+      const proxiedPosts = posts as unknown as RemoteProxy<Collection>;
       assert.strictEqual(await proxiedPosts.name, 'posts');
     });
   });
@@ -200,18 +200,18 @@ void suite('class instance proxying', () => {
     });
   });
 
-  void suite('ProxiedTypes parameter', () => {
-    void test('ProxiedTypes makes specified types fully proxied', async () => {
-      // Define a service interface
+  void suite('explicit proxy() marker', () => {
+    void test('proxy() marks values for explicit proxying', async () => {
+      // Define a service that uses proxy() for explicit type-safe proxying
       interface MyService {
-        createCounter(name: string): Counter;
+        createCounter(name: string): LocalProxy<Counter>;
         getData(): {value: number};
       }
 
-      // Implementation
+      // Implementation uses proxy() to mark class instances
       const service: MyService = {
-        createCounter(name: string): Counter {
-          return new Counter(name, 10);
+        createCounter(name: string): LocalProxy<Counter> {
+          return proxy(new Counter(name, 10));
         },
         getData(): {value: number} {
           return {value: 42};
@@ -221,23 +221,20 @@ void suite('class instance proxying', () => {
       const {port1, port2} = new MessageChannel();
       expose(service, port1);
 
-      // Use Remote with ProxiedTypes to declare Counter as proxied
-      // This gives us proper types for property access on Counter
-      // Note: wrap() returns Remote<T, []>, we cast to add ProxiedTypes
-      const remote = wrap<MyService>(port2) as unknown as Remote<
-        MyService,
-        [Counter]
-      >;
+      // wrap() returns Remote<MyService> which transforms:
+      // - LocalProxy<Counter> → RemoteProxy<Counter> (all access async)
+      // - {value: number} → {value: number} (plain object, cloned)
+      const remote = wrap<MyService>(port2);
 
       try {
-        // Counter is in ProxiedTypes, so it gets Proxied treatment
+        // Counter is explicitly proxied via proxy() - RemoteProxy<Counter>
         const counter = await remote.createCounter('test');
         // Properties are typed as Promise<T>
         assert.strictEqual(await counter.name, 'test');
         // Methods are typed as () => Promise<T>
         assert.strictEqual(await counter.increment(), 11);
 
-        // getData returns a plain object, NOT in ProxiedTypes
+        // getData returns a plain object, NOT wrapped with proxy()
         // Properties stay as-is (not Promise<T>)
         const data = await remote.getData();
         assert.strictEqual(data.value, 42); // Not awaited - it's just number
@@ -247,31 +244,36 @@ void suite('class instance proxying', () => {
       }
     });
 
-    void test('ExcludedTypes prevents proxification of matching types', async () => {
-      // Scenario: We have Widget as an interface, but sometimes we return
-      // a plain object that happens to match the interface (not proxied)
-      // and sometimes we return a class instance (actually proxied).
+    void test('proxy() value property gives access to wrapped object', () => {
+      const counter = new Counter('test', 5);
+      const wrapped = proxy(counter);
 
-      // We use ProxiedTypes for the proxied class, and ExcludedTypes
-      // for a more specific interface that should NOT be proxied.
+      // LocalProxy has a .value property to access the underlying object
+      assert.strictEqual(wrapped.value.name, 'test');
+      assert.strictEqual(wrapped.value.increment(), 6);
+      assert.strictEqual(wrapped.value.count, 6);
+    });
+
+    void test('plain objects vs proxied objects have different types', async () => {
+      // This test demonstrates how proxy() disambiguates the types
+      // that were previously ambiguous due to structural typing
 
       interface WidgetData {
         id: number;
         name: string;
       }
 
-      // Service returns different things
+      // Service with clearly typed returns
       interface MyService {
-        // Returns a class instance - should be proxied
-        createCounter(name: string): Counter;
-        // Returns plain data - matches Counter's 'name' property structurally
-        // but should NOT be treated as proxied
+        // Returns a proxied class instance
+        createCounter(name: string): LocalProxy<Counter>;
+        // Returns plain data (cloned)
         getWidgetData(): WidgetData;
       }
 
       const service: MyService = {
-        createCounter(name: string): Counter {
-          return new Counter(name, 10);
+        createCounter(name: string): LocalProxy<Counter> {
+          return proxy(new Counter(name, 10));
         },
         getWidgetData(): WidgetData {
           return {id: 1, name: 'widget1'};
@@ -281,21 +283,14 @@ void suite('class instance proxying', () => {
       const {port1, port2} = new MessageChannel();
       expose(service, port1);
 
-      // Without ExcludedTypes, WidgetData would match Counter due to
-      // structural typing (both have 'name: string'). With ExcludedTypes,
-      // we can be explicit that WidgetData is plain data.
-      const remote = wrap<MyService>(port2) as unknown as Remote<
-        MyService,
-        [Counter],
-        [WidgetData]
-      >;
+      const remote = wrap<MyService>(port2);
 
       try {
-        // Counter is proxied - properties are Promise<T>
+        // Counter is proxied - RemoteProxy<Counter>
         const counter = await remote.createCounter('test');
         assert.strictEqual(await counter.name, 'test');
 
-        // WidgetData is excluded - properties stay as-is
+        // WidgetData is plain object - properties are NOT promises
         const data = await remote.getWidgetData();
         assert.strictEqual(data.id, 1); // Not awaited
         assert.strictEqual(data.name, 'widget1'); // Not awaited
