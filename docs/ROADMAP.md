@@ -149,7 +149,7 @@ const docs = await users.find({});
 
 ---
 
-## Phase 3.5: Auto-Proxy Mode & Object Graph Handling ✅
+## Phase 3.5: Nested Proxies Mode & Object Graph Handling ✅
 
 **Goal**: Explicit control over proxying behavior
 
@@ -160,26 +160,26 @@ all behavior per-connection via options to `expose()` and `wrap()`.
 
 ### Deliverables
 
-- [x] Opt-in auto-proxy mode via options
-- [x] Top-level-only proxying in manual mode (default)
-- [x] Diamond-shaped object graph handling in auto-proxy mode
+- [x] Opt-in nested proxies mode via options
+- [x] Top-level-only proxying in shallow mode (default)
+- [x] Diamond-shaped object graph handling in nested proxies mode
 - [x] Identity preservation across the connection
 - [x] Debug mode with helpful `NonCloneableError` messages
 
-### Auto-Proxy Mode (default: off)
+### Nested Proxies Mode (default: off)
 
 ```typescript
-// With auto-proxy (opt-in for full traversal)
-const remote = wrap<Service>(endpoint, {autoProxy: true});
-expose(service, endpoint, {autoProxy: true});
+// With nested proxies (opt-in for full traversal)
+const remote = wrap<Service>(endpoint, {nestedProxies: true});
+expose(service, endpoint, {nestedProxies: true});
 
-// Without auto-proxy (default, simpler mental model)
-const remote = wrap<Service>(endpoint); // autoProxy: false
+// Without nested proxies (default, simpler mental model)
+const remote = wrap<Service>(endpoint); // nestedProxies: false
 ```
 
-### Manual Proxy Mode (default)
+### Shallow Mode (default)
 
-When `autoProxy: false` (the default), **only top-level values are considered
+When `nestedProxies: false` (the default), **only top-level values are considered
 for proxying** — the direct arguments and return values. Nested values are
 cloned via structured clone.
 
@@ -211,18 +211,18 @@ the problematic value, without the overhead of actually creating proxies:
 const remote = wrap<Service>(endpoint, {debug: true});
 
 // Error: NonCloneableError: Value of type 'function' at path 'onChange'
-// cannot be cloned. Enable autoProxy or use proxy() to wrap this value.
+// cannot be cloned. Use proxy() to wrap it, or use nestedProxies: true for functions/promises.
 ```
 
-If you need nested proxies without full auto-proxy, use auto-proxy mode.
+If you need nested proxies, enable nested proxies mode.
 
-### Auto-Proxy Mode (opt-in)
+### Nested Proxies Mode (opt-in)
 
-When `autoProxy: true`, the full payload is traversed to find functions and
+When `nestedProxies: true`, the full payload is traversed to find functions and
 non-plain objects, which are automatically proxied. This enables nested
 callbacks and richer data structures.
 
-### Object Graph Identity (auto-proxy only)
+### Object Graph Identity (nestedProxies only)
 
 ```typescript
 // Exposed side
@@ -243,12 +243,12 @@ data.a === data.b; // Should be true!
 
 ### Tests
 
-- [x] Auto-proxy mode opt-in works
-- [x] Manual mode only proxies top-level args/returns
-- [x] Nested functions in manual mode throw on clone
+- [x] Nested proxies mode opt-in works
+- [x] Shallow mode only proxies top-level args/returns
+- [x] Nested functions in shallow mode throw on clone
 - [x] Debug mode produces NonCloneableError with path
-- [x] Diamond object graph → same proxy instance (auto-proxy)
-- [x] Deep diamond graphs (auto-proxy)
+- [x] Diamond object graph → same proxy instance (nestedProxies)
+- [x] Deep diamond graphs (nestedProxies)
 
 ---
 
@@ -256,18 +256,18 @@ data.a === data.b; // Should be true!
 
 **Goal**: Full promise support across the boundary in both directions
 
-Promises are class instances, so they need special handling. In auto-proxy mode,
+Promises are class instances, so they need special handling. In nested proxies mode,
 promises anywhere in the object graph should be detected and proxied. In debug
 mode, we should produce helpful errors since promises may not cause
-`DataCloneError` but won't work correctly without `autoProxy`.
+`DataCloneError` but won't work correctly without `nestedProxies`.
 
 ### Deliverables
 
 - [x] Promise detection in arguments and return values
 - [x] Bidirectional promise passing (both sides can send promises)
 - [x] Promise resolution/rejection protocol
-- [x] Nested promises in objects, arrays, class fields (with autoProxy)
-- [x] Debug mode warnings for promises without autoProxy
+- [x] Nested promises in objects, arrays, class fields (with nestedProxies)
+- [x] Debug mode warnings for promises without nestedProxies
 - [x] Multiple promises in same payload
 
 ### API Shape
@@ -284,7 +284,7 @@ expose(
     },
   },
   self,
-  {autoProxy: true},
+  {nestedProxies: true},
 );
 
 // Main receives and awaits nested promises
@@ -299,13 +299,13 @@ await proxy.processData(fetchDataLocally()); // Promise proxied, resolved when s
 ### Tests
 
 - [x] Promise as top-level return value (already works via async)
-- [x] Promise in return object property (autoProxy)
-- [x] Promise in return array element (autoProxy)
+- [x] Promise in return object property (nestedProxies)
+- [x] Promise in return array element (nestedProxies)
 - [x] Promise as argument to remote method
 - [x] Promise rejection propagates correctly
 - [x] Multiple promises in same object
 - [x] Deeply nested promises
-- [x] Debug mode error for nested promise without autoProxy
+- [x] Debug mode error for nested promise without nestedProxies
 
 ---
 
@@ -470,10 +470,10 @@ types and pass them through directly instead of proxying.
 
 ---
 
-### ✅ RESOLVED: Benchmark anomaly where autoProxy appeared faster
+### ✅ RESOLVED: Benchmark anomaly where nestedProxies appeared faster
 
-**Observed**: In microbenchmarks, `{autoProxy: true}` connections sometimes showed
-10-20% higher ops/sec than non-autoProxy connections for simple string operations.
+**Observed**: In microbenchmarks, `{nestedProxies: true}` connections sometimes showed
+10-20% higher ops/sec than non-nestedProxies connections for simple string operations.
 
 **Root cause**: Benchmark harness overhead. When measuring single RPC calls per
 iteration, the `performance.now()` calls and loop overhead were significant relative
@@ -485,11 +485,11 @@ more calls, giving stable measurements.
 
 **Results after fix**:
 
-- Simple operations (string, numbers, binary): auto/st ratio ≈ 1.0x (identical, as expected)
-- Large objects: auto/st ratio ≈ 0.59x (autoProxy slower due to traversal)
-- Large arrays: auto/st ratio ≈ 0.66x (autoProxy slower due to traversal)
+- Simple operations (string, numbers, binary): nested/shallow ratio ≈ 1.0x (identical, as expected)
+- Large objects: nested/shallow ratio ≈ 0.59x (nestedProxies slower due to traversal)
+- Large arrays: nested/shallow ratio ≈ 0.66x (nestedProxies slower due to traversal)
 
-This matches expectations: autoProxy has no overhead for primitives, but must
+This matches expectations: nestedProxies has no overhead for primitives, but must
 traverse complex structures looking for functions to proxy.
 
 ---
