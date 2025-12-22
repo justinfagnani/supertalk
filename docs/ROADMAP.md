@@ -349,7 +349,7 @@ for await (const chunk of stream) {
 
 ---
 
-## Phase 6: Signals Integration (Next)
+## Phase 6: Signals Integration ✅
 
 **Goal**: Reactive state across boundaries
 
@@ -357,11 +357,23 @@ for await (const chunk of stream) {
 
 ### Deliverables
 
-- [ ] Signal detection
-- [ ] Signal proxy creation
-- [ ] Change notification protocol
-- [ ] Batched updates
-- [ ] Watcher integration
+- [x] Signal detection via handler
+- [x] RemoteSignal class with synchronous initial value
+- [x] SignalManager for coordinating both sides
+- [x] Change notification protocol via `signal:batch` messages
+- [x] Batched updates via queueMicrotask
+- [x] Signal.subtle.Watcher integration (with Computed wrapper pattern)
+
+### Implementation Notes
+
+- **Private Computed wrappers for change detection**: `getPending()` returns Computeds that
+  are invalidated but not yet read. If we watched user signals directly, reading them
+  elsewhere would clear their pending state before our flush. By wrapping each signal in
+  a private Computed that only we read, we have a reliable "dirty" flag.
+- **Asymmetric handler**: Sender sees `Signal.State`/`Computed`, receiver gets `RemoteSignal`.
+  The handler type is cast to accommodate this asymmetry.
+- **Synchronous initial value**: When a signal is transferred, its current value is sent
+  with the wire representation. `RemoteSignal.get()` returns this immediately.
 
 ### API Shape
 
@@ -378,24 +390,229 @@ expose(
     },
   },
   self,
+  {handlers: [signalManager.handler]},
 );
 
 // Main
 const countSignal = await proxy.count;
+countSignal.get(); // Synchronously available!
 effect(() => console.log(countSignal.get()));
-await proxy.increment(); // Effect runs
+await proxy.increment(); // Effect runs when update arrives
 ```
 
 ### Tests
 
-- [ ] Signal transfer
-- [ ] Remote updates
-- [ ] Batched notifications
-- [ ] Signal cleanup
+- [x] Signal transfer with initial value
+- [x] Remote updates propagate
+- [x] Batched notifications (multiple updates in one message)
+- [x] Computed signal transfer
+- [x] RemoteSignal works with local Signal.Computed
+- [x] Worker-based tests for signal graph isolation
+
+### Future Enhancements
+
+- [ ] Memory management: WeakRef + FinalizationRegistry for automatic signal cleanup
+- [ ] Release protocol: Notify sender when receiver no longer needs a signal
+- [ ] `@clone()` decorator for synchronous property access (see Phase 7)
 
 ---
 
-## Phase 7: HTTP Transport
+## Phase 7: Decorators
+
+**Goal**: Declarative service definition with metadata
+
+**Package**: `@supertalk/core` (decorators for core functionality)
+
+### Motivation
+
+Now that we have a concrete use case (`@clone()` for synchronous property access),
+decorators have clear value beyond just API sugar.
+
+### The Type Problem
+
+TypeScript decorators don't (yet) affect the type of decorated members. For decorators
+that change the remote type (like `@clone()` removing `Promise<>`), we pair the
+decorator with a **branded type wrapper**:
+
+```typescript
+// Branded type - affects Remote<T> transformation
+type Cloned<T> = T & { readonly __cloned: unique symbol };
+
+// Decorator - affects runtime behavior
+function clone() { /* ... */ }
+
+// Usage - decorator + branded type together
+class Service {
+  @clone() readonly count: Cloned<Signal.State<number>> = 
+    new Signal.State(0) as Cloned<Signal.State<number>>;
+}
+
+// Remote<Service>.count is Signal.State<number>, not Promise<Signal.State<number>>
+```
+
+This is verbose but explicit and type-safe. When TypeScript adds decorator type
+transformation, we can simplify.
+
+### Decorator Categories
+
+#### Field Access Control
+
+| Decorator | Purpose | Type Impact |
+|-----------|---------|-------------|
+| `@clone()` | Send value once, don't proxy | Removes `Promise<>` wrapper |
+| `@proxy()` | Force proxy for cloneable value | None (already `Promise<>`) |
+| `@ignore()` | Don't expose property remotely | Removes property entirely |
+| `@lazy()` | Don't prefetch, proxy on demand | None (default behavior) |
+
+#### Method Behavior
+
+| Decorator | Purpose | Type Impact |
+|-----------|---------|-------------|
+| `@timeout(ms)` | Timeout for this method | None |
+| `@retry(n)` | Retry on failure | None |
+| `@cached(ttl?)` | Cache result (TTL optional) | None |
+| `@transfer()` | Mark return as Transferable | None |
+
+#### Validation/Middleware (Future)
+
+| Decorator | Purpose | Type Impact |
+|-----------|---------|-------------|
+| `@validate(schema)` | Runtime arg validation | None |
+| `@authorize(role)` | Check authorization | None |
+| `@log()` | Debug logging | None |
+
+### Phase 7a: Core Field Decorators
+
+**Deliverables**:
+
+- [ ] `Cloned<T>` branded type
+- [ ] `@clone()` decorator + metadata storage
+- [ ] `Ignored<T>` branded type  
+- [ ] `@ignore()` decorator
+- [ ] Integration with `expose()` to read metadata
+- [ ] `Remote<T>` type updated to handle branded types
+
+### `@clone()` Decorator
+
+Marks a class field as "clone this value" instead of creating a property proxy.
+The value is sent once when the service is wrapped, enabling synchronous access.
+
+```typescript
+class CounterService {
+  // Signal property - cloned once, then updates via signal protocol
+  @clone() readonly count: Cloned<Signal.State<number>> = 
+    new Signal.State(0) as Cloned<Signal.State<number>>;
+
+  // Regular property - proxied, requires await
+  readonly config = {name: 'counter'};
+
+  increment() {
+    this.count.set(this.count.get() + 1);
+  }
+}
+
+// Usage
+const remote = wrap<CounterService>(endpoint);
+const signal = remote.count;  // Synchronous! No await needed
+signal.get();                 // Works immediately
+```
+
+### `@ignore()` Decorator
+
+Marks a field as internal - not exposed remotely at all.
+
+```typescript
+class Service {
+  @ignore() readonly #internal: Ignored<SomeType> = /* ... */;
+  
+  // Or for protected fields that shouldn't leak
+  @ignore() readonly _cache: Ignored<Map<string, unknown>> = new Map();
+}
+
+// Remote<Service> doesn't include _cache
+```
+
+### Design Considerations
+
+1. **Immutability assumption**: `@clone()` implies the property reference won't change.
+   If the field is reassigned, the remote won't see the new value.
+
+2. **Branded types are opt-in**: If you don't care about the type, just use the
+   decorator without the branded type. Runtime behavior works; types are slightly off.
+
+3. **Metadata storage**: Use standard decorator metadata API or WeakMap fallback.
+
+### Implementation Sketch
+
+```typescript
+// Branded types
+declare const CLONED: unique symbol;
+declare const IGNORED: unique symbol;
+
+export type Cloned<T> = T & { readonly [CLONED]: true };
+export type Ignored<T> = T & { readonly [IGNORED]: true };
+
+// Helper to create cloned values
+export function cloned<T>(value: T): Cloned<T> {
+  return value as Cloned<T>;
+}
+
+// Metadata storage
+const fieldMetadata = new WeakMap<object, Map<string | symbol, FieldOptions>>();
+
+interface FieldOptions {
+  cloned?: boolean;
+  ignored?: boolean;
+}
+
+// Decorator
+function clone(): <T>(
+  value: undefined,
+  context: ClassFieldDecoratorContext<unknown, T>
+) => void {
+  return (_value, context) => {
+    // Store metadata...
+  };
+}
+
+// Updated Remote<T> type
+type Remote<T> = {
+  [K in keyof T as T[K] extends Ignored<unknown> ? never : K]: 
+    T[K] extends Cloned<infer U> ? Awaited<Remoted<U>>
+    : T[K] extends AnyFunction ? /* async wrapper */
+    : Promise<Awaited<Remoted<T[K]>>>;
+};
+```
+
+### Phase 7b: Method Decorators (Future)
+
+```typescript
+class Service {
+  @timeout(5000)
+  @retry(3)
+  async fetchData(): Promise<Data> { /* ... */ }
+  
+  @cached(60_000)  // Cache for 1 minute
+  async getConfig(): Promise<Config> { /* ... */ }
+  
+  @transfer()  // Hint that return value should be transferred
+  async getBuffer(): Promise<ArrayBuffer> { /* ... */ }
+}
+```
+
+### Tests
+
+- [ ] `@clone()` field is synchronously available on remote
+- [ ] `Cloned<T>` type removes Promise wrapper in `Remote<T>`
+- [ ] `@ignore()` field is not accessible on remote
+- [ ] `Ignored<T>` type removes field from `Remote<T>`
+- [ ] Non-decorated fields still require await
+- [ ] Works with signals (main use case)
+- [ ] Decorator without branded type still works at runtime
+
+---
+
+## Phase 8: HTTP Transport
 
 **Goal**: Browser-to-server RPC
 
@@ -426,7 +643,7 @@ const result = await api.doSomething();
 
 ---
 
-## Phase 8: Advanced Features
+## Phase 9: Advanced Features
 
 **Goal**: Polish and advanced use cases
 
@@ -442,7 +659,6 @@ const result = await api.doSomething();
 
 ## Future Considerations
 
-- **Decorators** — Declarative service definition (`@service()`, `@method()`). Deferred until we have a clearer idea of what value they add.
 - WebSocket transport
 - Node.js worker threads
 - SharedArrayBuffer integration

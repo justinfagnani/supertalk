@@ -46,7 +46,8 @@ export class SignalManager {
   #watcher: Signal.subtle.Watcher | undefined;
   #flushScheduled = false;
 
-  // Wrapper computeds for State signals (watcher only tracks Computeds)
+  // Private wrapper Computeds - only we read these, so getPending() reliably
+  // returns them even if the underlying signal was read elsewhere.
   #signalWrappers = new Map<number, Signal.Computed<unknown>>();
 
   // Receiver side: RemoteSignals we've created, indexed by ID
@@ -120,8 +121,13 @@ export class SignalManager {
       this.#sentSignals.set(signalId, signal);
       this.#signalToId.set(signal, signalId);
 
-      // Start watching via a wrapper Computed
-      // (Watcher only tracks Computed signals, not State signals directly)
+      // Wrap in a private Computed for reliable change detection.
+      //
+      // getPending() returns Computeds that are invalidated but not yet read.
+      // If we watched the user's signal directly and someone else read it before
+      // our flush, it would no longer be pending. By wrapping in our own Computed
+      // that only we read, we have a private "dirty" flag that stays set until
+      // we explicitly read it in #flush.
       const watcher = this.#ensureWatcher();
       const wrapper = new Signal.Computed(() => signal.get());
       this.#signalWrappers.set(signalId, wrapper);
