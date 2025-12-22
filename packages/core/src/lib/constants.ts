@@ -25,11 +25,6 @@ export const LOCAL_PROXY = Symbol('supertalk.localProxy');
 export const TRANSFER = Symbol('supertalk.transfer');
 
 /**
- * Reserved target ID for the root service.
- */
-export const ROOT_TARGET = 0;
-
-/**
  * Reserved message ID for the initialization handshake.
  * The exposed side sends a Return/Throw with this ID to signal readiness.
  */

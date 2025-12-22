@@ -210,7 +210,7 @@ export type CallAction = 'call' | 'get';
 /**
  * Call a method on a target object, invoke a function, or get a property.
  *
- * - target: 0 for root service, otherwise a proxy ID
+ * - target: proxy ID of the target object
  * - action: 'call' to invoke, 'get' to get property
  * - method: method/property name, or undefined for direct function invocation
  */

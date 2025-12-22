@@ -84,7 +84,7 @@ export class Connection {
 
   // Registry for local objects we expose to remote (strong refs)
   // ID counter for local objects (remote IDs come from the wire)
-  #nextLocalId = 1;
+  #nextLocalId = 0;
   #localById = new Map<number, object>();
   #localByObject = new WeakMap<object, number>();
 
@@ -127,23 +127,15 @@ export class Connection {
   }
 
   /**
-   * Expose an object at a target ID and send the ready signal.
-   * Use ROOT_TARGET for the root service.
+   * Expose an object as the root service and send the ready signal.
    */
-  expose(target: number, obj: object): void {
-    this.#registerLocal(obj, target);
+  expose(obj: object): void {
+    this.#registerLocal(obj);
     this.#endpoint.postMessage({
       type: 'return',
       id: HANDSHAKE_ID,
       value: this.#makeProxyWire(obj),
     });
-  }
-
-  /**
-   * Get a proxy for a remote object. Use ROOT_TARGET for the root service.
-   */
-  proxy(proxyId: number): object {
-    return this.#createRemoteProxy(proxyId);
   }
 
   /**
@@ -158,6 +150,9 @@ export class Connection {
    * Returns a proxy for the root service.
    */
   waitForReady(): Promise<unknown> {
+    // Skip ID 0 on the wrap side - it's reserved for the root service on the
+    // expose side. This ensures local IDs don't collide with remote IDs.
+    this.#nextLocalId = 1;
     return new Promise((resolve, reject) => {
       this.#pendingCalls.set(HANDSHAKE_ID, {
         resolve,
@@ -172,14 +167,13 @@ export class Connection {
 
   /**
    * Register a local object and return its ID.
-   * If explicitId is provided, use that instead of generating one.
    */
-  #registerLocal(obj: object, explicitId?: number): number {
+  #registerLocal(obj: object): number {
     const existing = this.#localByObject.get(obj);
     if (existing !== undefined) {
       return existing;
     }
-    const id = explicitId ?? this.#nextLocalId++;
+    const id = this.#nextLocalId++;
     this.#localById.set(id, obj);
     this.#localByObject.set(obj, id);
     return id;

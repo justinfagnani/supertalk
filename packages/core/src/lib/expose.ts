@@ -8,7 +8,6 @@
  */
 
 import type {Endpoint, Options} from './types.js';
-import {ROOT_TARGET} from './constants.js';
 import {Connection} from './connection.js';
 
 /**
@@ -28,6 +27,6 @@ export function expose(
   options: Options = {},
 ): () => void {
   const connection = new Connection(endpoint, options);
-  connection.expose(ROOT_TARGET, obj);
+  connection.expose(obj);
   return () => connection.close();
 }
