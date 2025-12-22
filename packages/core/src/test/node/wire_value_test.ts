@@ -10,7 +10,7 @@ void suite('wire value edge cases', () => {
   void test('user object with type property should not confuse wire protocol', async () => {
     // This tests that user objects with a "type" property don't get
     // misinterpreted as wire protocol messages
-    using ctx = setupService({
+    await using ctx = await setupService({
       echo<T>(value: T): T {
         return value;
       },
@@ -51,7 +51,7 @@ void suite('wire value edge cases', () => {
 
   void test('user object with Supertalk-like properties should not confuse markers', async () => {
     // This tests that nested markers require the correct type AND payload property
-    using ctx = setupService({
+    await using ctx = await setupService({
       echo<T>(value: T): T {
         return value;
       },
@@ -84,7 +84,7 @@ void suite('wire value edge cases', () => {
   });
 
   void test('nested user objects with type properties', async () => {
-    using ctx = setupService({
+    await using ctx = await setupService({
       echo<T>(value: T): T {
         return value;
       },

@@ -31,12 +31,12 @@ suite('expose and wrap (browser)', () => {
       },
     };
 
-    expose(service, port1);
-    const proxy = wrap<typeof service>(port2);
-
-    // In browser, MessagePort needs start() to be called
+    // In browser, MessagePort needs start() to be called before messages flow
     port1.start();
     port2.start();
+
+    expose(service, port1);
+    const proxy = await wrap<typeof service>(port2);
 
     const sum = await proxy.add(2, 3);
     if (sum !== 5) {
@@ -62,11 +62,12 @@ suite('expose and wrap (browser)', () => {
     };
 
     expose(service, port1);
-    const proxy = wrap<typeof service>(port2);
 
-    // In browser, MessagePort needs start() to be called
+    // In browser, MessagePort needs start() to be called before messages flow
     port1.start();
     port2.start();
+
+    const proxy = await wrap<typeof service>(port2);
 
     try {
       await proxy.fail();

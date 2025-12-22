@@ -15,7 +15,7 @@ import {setupService} from './test-utils.js';
 void suite('function proxying', () => {
   void suite('functions as arguments', () => {
     void test('callback is invoked', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         callWithValue(value: number, callback: (v: number) => void): void {
           callback(value * 2);
         },
@@ -28,7 +28,7 @@ void suite('function proxying', () => {
     });
 
     void test('callback with return value', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         transform(value: string, fn: (s: string) => string): string {
           return fn(value);
         },
@@ -41,7 +41,7 @@ void suite('function proxying', () => {
     });
 
     void test('multiple callbacks', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         compute(
           a: number,
           b: number,
@@ -79,7 +79,7 @@ void suite('function proxying', () => {
     });
 
     void test('callback invoked multiple times', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         forEach(items: Array<number>, callback: (item: number) => void): void {
           for (const item of items) {
             callback(item);
@@ -102,7 +102,7 @@ void suite('function proxying', () => {
 
   void suite('functions as return values', () => {
     void test('returned function can be invoked', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         getMultiplier(factor: number): (n: number) => number {
           return (n) => n * factor;
         },
@@ -116,7 +116,7 @@ void suite('function proxying', () => {
     });
 
     void test('returned function maintains closure', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         createCounter(): () => number {
           let count = 0;
           return () => ++count;
@@ -140,7 +140,7 @@ void suite('function proxying', () => {
       }
 
       // Nested functions require nestedProxies: true
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           processWithOptions(options: Options): void {
             options.onComplete(options.value * 2);
@@ -165,7 +165,7 @@ void suite('function proxying', () => {
       }
 
       // Nested functions require nestedProxies: true
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           createWidget(name: string): Widget {
             return {
@@ -188,7 +188,7 @@ void suite('function proxying', () => {
   void suite('functions nested in arrays', () => {
     void test('callbacks in array argument', async () => {
       // Nested functions require nestedProxies: true
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           invokeAll(callbacks: Array<() => void>): void {
             for (const cb of callbacks) {
@@ -219,7 +219,7 @@ void suite('function proxying', () => {
 
     void test('functions in returned array', async () => {
       // Nested functions require nestedProxies: true
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           getOperations(): Array<(n: number) => number> {
             return [(n) => n + 1, (n) => n * 2, (n) => n ** 2];

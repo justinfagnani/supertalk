@@ -23,7 +23,7 @@ void suite('Proxy round-trip', () => {
     void test('callback returned back to caller is same function', async () => {
       let capturedCallback: (() => string) | undefined;
 
-      using ctx = setupService({
+      await using ctx = await setupService({
         registerCallback(cb: () => string): void {
           capturedCallback = cb;
         },
@@ -55,7 +55,7 @@ void suite('Proxy round-trip', () => {
     void test('invoke registered callback', async () => {
       let capturedCallback: (() => string) | undefined;
 
-      using ctx = setupService({
+      await using ctx = await setupService({
         registerCallback(cb: () => string): void {
           capturedCallback = cb;
         },
@@ -87,7 +87,7 @@ void suite('Proxy round-trip', () => {
         }
       }
 
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           createHandler(): LocalProxy<Handler> {
             return proxy(new Handler());
@@ -131,7 +131,7 @@ void suite('Proxy round-trip', () => {
       // Track received objects
       const receivedInners: Array<Inner> = [];
 
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           getWrapper(): {inner: LocalProxy<Inner>} {
             // Use proxy() to explicitly mark the class instance
@@ -169,7 +169,7 @@ void suite('Proxy round-trip', () => {
     void test('multiple callbacks maintain distinct identities', async () => {
       const capturedCallbacks = new Map<string, () => string>();
 
-      using ctx = setupService({
+      await using ctx = await setupService({
         register(name: string, cb: () => string): void {
           capturedCallbacks.set(name, cb);
         },
@@ -198,7 +198,7 @@ void suite('Proxy round-trip', () => {
 
       let capturedCallback: (() => LocalProxy<Result>) | undefined;
 
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           setCallback(cb: () => LocalProxy<Result>): void {
             capturedCallback = cb;
@@ -243,7 +243,7 @@ void suite('Proxy round-trip', () => {
         }
       }
 
-      using ctx = setupService({
+      await using ctx = await setupService({
         getData(): Data {
           return new Data();
         },
@@ -275,7 +275,7 @@ void suite('Proxy round-trip', () => {
         field = 'the value';
       }
 
-      using ctx = setupService({
+      await using ctx = await setupService({
         getData(): Data {
           return new Data();
         },

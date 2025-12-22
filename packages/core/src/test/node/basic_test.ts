@@ -12,7 +12,7 @@ void suite('@supertalk/core', () => {
 
 void suite('expose and wrap', () => {
   void test('basic method call', async () => {
-    using ctx = setupService({
+    await using ctx = await setupService({
       add(a: number, b: number): number {
         return a + b;
       },
@@ -23,7 +23,7 @@ void suite('expose and wrap', () => {
   });
 
   void test('async method call', async () => {
-    using ctx = setupService({
+    await using ctx = await setupService({
       fetchValue(): Promise<string> {
         return Promise.resolve('hello');
       },
@@ -34,7 +34,7 @@ void suite('expose and wrap', () => {
   });
 
   void test('multiple concurrent calls', async () => {
-    using ctx = setupService({
+    await using ctx = await setupService({
       async delay(ms: number, value: string): Promise<string> {
         await new Promise((resolve) => setTimeout(resolve, ms));
         return value;
@@ -52,7 +52,7 @@ void suite('expose and wrap', () => {
   });
 
   void test('error propagation', async () => {
-    using ctx = setupService({
+    await using ctx = await setupService({
       throwError(): never {
         throw new Error('test error');
       },
@@ -74,7 +74,7 @@ void suite('expose and wrap', () => {
       },
     };
 
-    using ctx = setupService(service);
+    await using ctx = await setupService(service);
     // Cast to add a fake method that doesn't exist
     const proxy = ctx.remote as typeof ctx.remote & {
       notExists: () => Promise<string>;
@@ -106,7 +106,7 @@ void suite('expose and wrap', () => {
       }
     }
 
-    using ctx = setupService(new Calculator(10));
+    await using ctx = await setupService(new Calculator(10));
 
     assert.strictEqual(await ctx.remote.add(5), 15);
     assert.strictEqual(await ctx.remote.multiply(3), 30);

@@ -436,15 +436,18 @@ decorator with a **branded type wrapper**:
 
 ```typescript
 // Branded type - affects Remote<T> transformation
-type Cloned<T> = T & { readonly __cloned: unique symbol };
+type Cloned<T> = T & {readonly __cloned: unique symbol};
 
 // Decorator - affects runtime behavior
-function clone() { /* ... */ }
+function clone() {
+  /* ... */
+}
 
 // Usage - decorator + branded type together
 class Service {
-  @clone() readonly count: Cloned<Signal.State<number>> = 
-    new Signal.State(0) as Cloned<Signal.State<number>>;
+  @clone() readonly count: Cloned<Signal.State<number>> = new Signal.State(
+    0,
+  ) as Cloned<Signal.State<number>>;
 }
 
 // Remote<Service>.count is Signal.State<number>, not Promise<Signal.State<number>>
@@ -457,29 +460,29 @@ transformation, we can simplify.
 
 #### Field Access Control
 
-| Decorator | Purpose | Type Impact |
-|-----------|---------|-------------|
-| `@clone()` | Send value once, don't proxy | Removes `Promise<>` wrapper |
-| `@proxy()` | Force proxy for cloneable value | None (already `Promise<>`) |
-| `@ignore()` | Don't expose property remotely | Removes property entirely |
-| `@lazy()` | Don't prefetch, proxy on demand | None (default behavior) |
+| Decorator   | Purpose                         | Type Impact                 |
+| ----------- | ------------------------------- | --------------------------- |
+| `@clone()`  | Send value once, don't proxy    | Removes `Promise<>` wrapper |
+| `@proxy()`  | Force proxy for cloneable value | None (already `Promise<>`)  |
+| `@ignore()` | Don't expose property remotely  | Removes property entirely   |
+| `@lazy()`   | Don't prefetch, proxy on demand | None (default behavior)     |
 
 #### Method Behavior
 
-| Decorator | Purpose | Type Impact |
-|-----------|---------|-------------|
-| `@timeout(ms)` | Timeout for this method | None |
-| `@retry(n)` | Retry on failure | None |
-| `@cached(ttl?)` | Cache result (TTL optional) | None |
-| `@transfer()` | Mark return as Transferable | None |
+| Decorator       | Purpose                     | Type Impact |
+| --------------- | --------------------------- | ----------- |
+| `@timeout(ms)`  | Timeout for this method     | None        |
+| `@retry(n)`     | Retry on failure            | None        |
+| `@cached(ttl?)` | Cache result (TTL optional) | None        |
+| `@transfer()`   | Mark return as Transferable | None        |
 
 #### Validation/Middleware (Future)
 
-| Decorator | Purpose | Type Impact |
-|-----------|---------|-------------|
-| `@validate(schema)` | Runtime arg validation | None |
-| `@authorize(role)` | Check authorization | None |
-| `@log()` | Debug logging | None |
+| Decorator           | Purpose                | Type Impact |
+| ------------------- | ---------------------- | ----------- |
+| `@validate(schema)` | Runtime arg validation | None        |
+| `@authorize(role)`  | Check authorization    | None        |
+| `@log()`            | Debug logging          | None        |
 
 ### Phase 7a: Core Field Decorators
 
@@ -487,7 +490,7 @@ transformation, we can simplify.
 
 - [ ] `Cloned<T>` branded type
 - [ ] `@clone()` decorator + metadata storage
-- [ ] `Ignored<T>` branded type  
+- [ ] `Ignored<T>` branded type
 - [ ] `@ignore()` decorator
 - [ ] Integration with `expose()` to read metadata
 - [ ] `Remote<T>` type updated to handle branded types
@@ -500,8 +503,9 @@ The value is sent once when the service is wrapped, enabling synchronous access.
 ```typescript
 class CounterService {
   // Signal property - cloned once, then updates via signal protocol
-  @clone() readonly count: Cloned<Signal.State<number>> = 
-    new Signal.State(0) as Cloned<Signal.State<number>>;
+  @clone() readonly count: Cloned<Signal.State<number>> = new Signal.State(
+    0,
+  ) as Cloned<Signal.State<number>>;
 
   // Regular property - proxied, requires await
   readonly config = {name: 'counter'};
@@ -513,8 +517,8 @@ class CounterService {
 
 // Usage
 const remote = wrap<CounterService>(endpoint);
-const signal = remote.count;  // Synchronous! No await needed
-signal.get();                 // Works immediately
+const signal = remote.count; // Synchronous! No await needed
+signal.get(); // Works immediately
 ```
 
 ### `@ignore()` Decorator
@@ -524,7 +528,7 @@ Marks a field as internal - not exposed remotely at all.
 ```typescript
 class Service {
   @ignore() readonly #internal: Ignored<SomeType> = /* ... */;
-  
+
   // Or for protected fields that shouldn't leak
   @ignore() readonly _cache: Ignored<Map<string, unknown>> = new Map();
 }
@@ -577,7 +581,7 @@ function clone(): <T>(
 
 // Updated Remote<T> type
 type Remote<T> = {
-  [K in keyof T as T[K] extends Ignored<unknown> ? never : K]: 
+  [K in keyof T as T[K] extends Ignored<unknown> ? never : K]:
     T[K] extends Cloned<infer U> ? Awaited<Remoted<U>>
     : T[K] extends AnyFunction ? /* async wrapper */
     : Promise<Awaited<Remoted<T[K]>>>;
@@ -590,13 +594,19 @@ type Remote<T> = {
 class Service {
   @timeout(5000)
   @retry(3)
-  async fetchData(): Promise<Data> { /* ... */ }
-  
-  @cached(60_000)  // Cache for 1 minute
-  async getConfig(): Promise<Config> { /* ... */ }
-  
-  @transfer()  // Hint that return value should be transferred
-  async getBuffer(): Promise<ArrayBuffer> { /* ... */ }
+  async fetchData(): Promise<Data> {
+    /* ... */
+  }
+
+  @cached(60_000) // Cache for 1 minute
+  async getConfig(): Promise<Config> {
+    /* ... */
+  }
+
+  @transfer() // Hint that return value should be transferred
+  async getBuffer(): Promise<ArrayBuffer> {
+    /* ... */
+  }
 }
 ```
 

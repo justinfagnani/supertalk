@@ -17,7 +17,7 @@ Supertalk handles all of that, letting you **expose rich, high-level APIs across
 expose(myService, self);
 
 // From your main thread
-const service = wrap<MyService>(worker);
+const service = await wrap<MyService>(worker);
 const widget = await service.createWidget();
 await widget.onClick(() => console.log('clicked!'));
 ```
@@ -89,7 +89,7 @@ Supertalk provides a `debug` option that traverses your data before sending and
 throws a `NonCloneableError` with the exact path to the problematic value:
 
 ```ts
-const remote = wrap<Service>(endpoint, {debug: true});
+const remote = await wrap<Service>(endpoint, {debug: true});
 
 // Now when something fails to clone, you get:
 // NonCloneableError: Function at "config.onChange" cannot be cloned.
@@ -145,7 +145,7 @@ import {streamHandler} from '@supertalk/core/handlers/streams.js';
 
 // Both sides must use the same handlers
 expose(service, self, {handlers: [streamHandler]});
-const remote = wrap<typeof service>(worker, {handlers: [streamHandler]});
+const remote = await wrap<typeof service>(worker, {handlers: [streamHandler]});
 
 // Now streams transfer automatically
 const stream = await remote.getDataStream();
@@ -195,7 +195,7 @@ const mapHandler: Handler<Map<unknown, unknown>> = {
 
 // Use on both sides
 expose(service, self, {handlers: [mapHandler]});
-const remote = wrap<typeof service>(worker, {handlers: [mapHandler]});
+const remote = await wrap<typeof service>(worker, {handlers: [mapHandler]});
 ```
 
 ### Handler Context Methods
@@ -230,7 +230,7 @@ expose(service, self);
 import {wrap} from '@supertalk/core';
 
 const worker = new Worker('./worker.ts');
-const remote = wrap<typeof service>(worker);
+const remote = await wrap<typeof service>(worker);
 
 // Methods become async
 const result = await remote.add(1, 2); // 3
@@ -370,7 +370,7 @@ const service = {
 };
 
 // On wrapped side
-const remote = wrap<typeof service>(worker, {nestedProxies: true});
+const remote = await wrap<typeof service>(worker, {nestedProxies: true});
 
 const data = await remote.getData();
 data.name; // 'example' (local copy)
@@ -394,8 +394,9 @@ interface MyService {
   getData(): {value: number};
 }
 
-const remote = wrap<MyService>(worker);
-// Remote<MyService> = {
+const remote = await wrap<MyService>(worker);
+// remote has type Remote<MyService>:
+// {
 //   add(a, b): Promise<number>;
 //   createWidget(): Promise<RemoteProxy<Widget>>;
 //   getData(): Promise<{ value: number }>;
@@ -408,8 +409,8 @@ Like `Remote<T>`, but for nested mode. Arguments also accept remoted versions
 (for round-trip proxy handling):
 
 ```ts
-const remote = wrap<MyService>(worker, {nestedProxies: true});
-// Returns RemoteNested<MyService>
+const remote = await wrap<MyService>(worker, {nestedProxies: true});
+// remote has type RemoteNested<MyService>
 ```
 
 ### `Remoted<T>`

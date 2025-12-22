@@ -30,6 +30,12 @@ export const TRANSFER = Symbol('supertalk.transfer');
 export const ROOT_TARGET = 0;
 
 /**
+ * Reserved message ID for the initialization handshake.
+ * The exposed side sends a Return/Throw with this ID to signal readiness.
+ */
+export const HANDSHAKE_ID = 0;
+
+/**
  * Symbol used to brand proxy properties so they can be detected when passed
  * as arguments. The value contains the target proxy ID and property name.
  */

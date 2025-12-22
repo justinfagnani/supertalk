@@ -186,6 +186,10 @@ export type Remoted<T> =
 
 /**
  * Message types for the wire protocol.
+ *
+ * Note: `id: 0` is reserved for the initialization handshake. The exposed side
+ * sends a ReturnMessage with id 0 containing the root proxy when ready, or a
+ * ThrowMessage with id 0 if initialization fails.
  */
 export type Message =
   | CallMessage

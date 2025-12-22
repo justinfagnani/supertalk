@@ -232,21 +232,22 @@ creating a property proxy that requires `await` on every access.
 ```typescript
 class CounterService {
   @clone() readonly count = new Signal.State(0);
-  
+
   increment() {
     this.count.set(this.count.get() + 1);
   }
 }
 
 // Without @clone(): requires await for property access
-const signal = await remote.count;  // Promise<RemoteSignal<number>>
+const signal = await remote.count; // Promise<RemoteSignal<number>>
 
 // With @clone(): synchronous access
-const signal = remote.count;  // RemoteSignal<number> - no await!
-signal.get();  // Works immediately with initial value
+const signal = remote.count; // RemoteSignal<number> - no await!
+signal.get(); // Works immediately with initial value
 ```
 
 **Semantics**:
+
 - The property's current value is transferred when `wrap()` connects
 - The value is cloned/transferred once; the reference is immutable
 - If the property is a signal, subsequent updates flow via the signal protocol
@@ -265,7 +266,7 @@ The inverse of `@clone()` - mark a field that would normally be cloned as
 ```typescript
 class Service {
   @proxy() readonly expensiveData = loadHugeDataset();
-  
+
   process(): void {
     // Uses this.expensiveData locally
   }

@@ -91,19 +91,23 @@ export interface WorkerContext<T> {
  */
 export function createWorker(
   serviceType: 'counter',
-): WorkerContext<CounterService>;
+): Promise<WorkerContext<CounterService>>;
 export function createWorker(
   serviceType: 'computed',
-): WorkerContext<ComputedService>;
-export function createWorker(serviceType: 'multi'): WorkerContext<MultiService>;
-export function createWorker(serviceType: ServiceType): WorkerContext<unknown> {
+): Promise<WorkerContext<ComputedService>>;
+export function createWorker(
+  serviceType: 'multi',
+): Promise<WorkerContext<MultiService>>;
+export async function createWorker(
+  serviceType: ServiceType,
+): Promise<WorkerContext<unknown>> {
   const worker = new Worker(WORKER_PATH, {
     workerData: {serviceType},
   });
 
   const endpoint = workerToEndpoint(worker);
   const manager = new SignalManager(endpoint);
-  const remote = wrap(endpoint, {
+  const remote = await wrap(endpoint, {
     handlers: [manager.handler],
   });
 

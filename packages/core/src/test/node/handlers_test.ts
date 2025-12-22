@@ -93,7 +93,7 @@ const setHandler: Handler<Set<unknown>, WireSet> = {
 
 void suite('Handler system', () => {
   void test('custom Map handler - return value', async () => {
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         getMap(): Map<string, number> {
           return new Map([
@@ -115,7 +115,7 @@ void suite('Handler system', () => {
   });
 
   void test('custom Map handler - argument', async () => {
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         sumMap(map: Map<string, number>): number {
           let sum = 0;
@@ -137,7 +137,7 @@ void suite('Handler system', () => {
   });
 
   void test('custom Set handler - return value', async () => {
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         getSet(): Set<string> {
           return new Set(['apple', 'banana', 'cherry']);
@@ -155,7 +155,7 @@ void suite('Handler system', () => {
   });
 
   void test('custom Set handler - argument', async () => {
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         hasItem(set: Set<string>, item: string): boolean {
           return set.has(item);
@@ -172,7 +172,7 @@ void suite('Handler system', () => {
   });
 
   void test('nested handlers - Map containing Sets', async () => {
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         getMapOfSets(): Map<string, Set<number>> {
           return new Map([
@@ -207,7 +207,7 @@ void suite('Handler system', () => {
       scores: Map<string, number>;
     }
 
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         getData(): Data {
           return {
@@ -238,7 +238,7 @@ void suite('Handler system', () => {
       fromWire: () => new Map([['from', 'alt']]),
     };
 
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         getMap(): Map<string, string> {
           return new Map([['original', 'value']]);
@@ -271,7 +271,7 @@ void suite('Handler system', () => {
     );
 
     // Client has no handlers - will get raw wire value
-    const remote = wrap<{getMap: () => Map<string, number>}>(port2, {
+    const remote = await wrap<{getMap: () => Map<string, number>}>(port2, {
       handlers: [],
     });
 
@@ -287,7 +287,7 @@ void suite('Handler system', () => {
 
 void suite('Handler with proxied values', () => {
   void test('Map with proxied function values', async () => {
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         getCallbacks(): Map<string, () => string> {
           return new Map([
@@ -321,7 +321,7 @@ void suite('Handler with proxied values', () => {
 
 void suite('Stream handlers', () => {
   void test('ReadableStream handler - return value', async () => {
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         getStream(): ReadableStream<string> {
           return new ReadableStream({
@@ -355,7 +355,7 @@ void suite('Stream handlers', () => {
   });
 
   void test('ReadableStream handler - argument', async () => {
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         async consumeStream(
           stream: ReadableStream<string>,
@@ -391,7 +391,7 @@ void suite('Stream handlers', () => {
     // Client writes to it, then we read from service side to verify
     const transform = new TransformStream<string>();
 
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         getSink(): WritableStream<string> {
           return transform.writable;
@@ -430,7 +430,7 @@ void suite('Stream handlers', () => {
   });
 
   void test('WritableStream handler - argument', async () => {
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         async writeToSink(sink: WritableStream<string>): Promise<void> {
           const writer = sink.getWriter();
@@ -466,7 +466,7 @@ void suite('Stream handlers', () => {
   });
 
   void test('TransformStream - bidirectional', async () => {
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         async processStream(
           input: ReadableStream<number>,
@@ -520,7 +520,7 @@ void suite('Stream handlers', () => {
 
 void suite('Manual transfer() without handler', () => {
   void test('manually transferred stream works without any handlers', async () => {
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         getStream() {
           const stream = new ReadableStream({
@@ -555,7 +555,7 @@ void suite('Manual transfer() without handler', () => {
   });
 
   void test('manually transferred stream works with unrelated handlers', async () => {
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         getStream() {
           const stream = new ReadableStream({
@@ -591,7 +591,7 @@ void suite('Manual transfer() without handler', () => {
   });
 
   void test('manually transferred stream as argument with unrelated handlers', async () => {
-    using ctx = setupService(
+    await using ctx = await setupService(
       {
         async consumeStream(
           stream: ReadableStream<string>,

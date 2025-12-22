@@ -25,7 +25,7 @@ import type {
   FromWireContext,
 } from './types.js';
 import {isWireProxy, isWirePromise} from './types.js';
-import {PROXY_PROPERTY_BRAND, WIRE_TYPE} from './constants.js';
+import {PROXY_PROPERTY_BRAND, WIRE_TYPE, HANDSHAKE_ID} from './constants.js';
 import {
   isLocalProxy,
   isProxyProperty,
@@ -127,10 +127,16 @@ export class Connection {
   }
 
   /**
-   * Expose an object at a target ID. Use ROOT_TARGET for the root service.
+   * Expose an object at a target ID and send the ready signal.
+   * Use ROOT_TARGET for the root service.
    */
   expose(target: number, obj: object): void {
     this.#registerLocal(obj, target);
+    this.#endpoint.postMessage({
+      type: 'return',
+      id: HANDSHAKE_ID,
+      value: this.#makeProxyWire(obj),
+    });
   }
 
   /**
@@ -145,6 +151,19 @@ export class Connection {
    */
   close(): void {
     this.#endpoint.removeEventListener('message', this.#handleMessage);
+  }
+
+  /**
+   * Wait for the ready signal from the remote side.
+   * Returns a proxy for the root service.
+   */
+  waitForReady(): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      this.#pendingCalls.set(HANDSHAKE_ID, {
+        resolve,
+        reject,
+      });
+    });
   }
 
   // ============================================================

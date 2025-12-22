@@ -35,21 +35,21 @@ export interface SignalServiceContext<R> {
 
 /**
  * Set up a service with signal support and return a remote proxy for testing.
- * Use with `using` to automatically close ports when the scope ends.
+ * Use with `await using` to automatically close ports when the scope ends.
  *
  * @example
  * ```ts
- * using ctx = setupSignalService({
+ * await using ctx = await setupSignalService({
  *   get count() { return countSignal; }
  * });
  * const count = await ctx.remote.count;
  * // ports are automatically closed when ctx goes out of scope
  * ```
  */
-export function setupSignalService<T extends object>(
+export async function setupSignalService<T extends object>(
   service: T,
   options: Omit<Options, 'handlers'> = {},
-): SignalServiceContext<Remote<T>> {
+): Promise<SignalServiceContext<Remote<T>>> {
   const {port1, port2} = new MessageChannel();
 
   // Create signal managers for both sides
@@ -63,7 +63,7 @@ export function setupSignalService<T extends object>(
   });
 
   // Wrap with signal handler
-  const remote = wrap<T>(port2, {
+  const remote = await wrap<T>(port2, {
     ...options,
     handlers: [
       receiverManager.handler,

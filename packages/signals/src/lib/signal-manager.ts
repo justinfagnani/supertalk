@@ -14,7 +14,7 @@
  *
  * // Expose/wrap with the handler
  * expose(service, endpoint, options);
- * const remote = wrap<Service>(endpoint, options);
+ * const remote = await wrap<Service>(endpoint, options);
  * ```
  */
 

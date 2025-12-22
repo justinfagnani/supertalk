@@ -77,7 +77,7 @@ class Collection {
 void suite('class instance proxying', () => {
   void suite('basic class instances', () => {
     void test('returned class instance is proxied', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         createCounter(name: string): LocalProxy<Counter> {
           return proxy(new Counter(name));
         },
@@ -91,7 +91,7 @@ void suite('class instance proxying', () => {
     });
 
     void test('class instance methods maintain state', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         createCounter(name: string, initial: number): LocalProxy<Counter> {
           return proxy(new Counter(name, initial));
         },
@@ -106,7 +106,7 @@ void suite('class instance proxying', () => {
     });
 
     void test('class instance property access', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         createCounter(name: string): LocalProxy<Counter> {
           return proxy(new Counter(name));
         },
@@ -122,7 +122,7 @@ void suite('class instance proxying', () => {
     });
 
     void test('class instance getter access', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         createCounter(name: string, initial: number): LocalProxy<Counter> {
           return proxy(new Counter(name, initial));
         },
@@ -140,7 +140,7 @@ void suite('class instance proxying', () => {
 
   void suite('chained method calls', () => {
     void test('method returning another class instance', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         getDatabase(): LocalProxy<Database> {
           return proxy(new Database());
         },
@@ -158,7 +158,7 @@ void suite('class instance proxying', () => {
     });
 
     void test('deeply nested class instances', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         getDatabase(): LocalProxy<Database> {
           return proxy(new Database());
         },
@@ -176,7 +176,7 @@ void suite('class instance proxying', () => {
     void test('same instance returned multiple times is same proxy', async () => {
       const sharedCounter = new Counter('shared', 100);
 
-      using ctx = setupService({
+      await using ctx = await setupService({
         getCounter(): LocalProxy<Counter> {
           return proxy(sharedCounter);
         },
@@ -221,7 +221,7 @@ void suite('class instance proxying', () => {
       // wrap() returns Remote<MyService> which transforms:
       // - LocalProxy<Counter> → RemoteProxy<Counter> (all access async)
       // - {value: number} → {value: number} (plain object, cloned)
-      const remote = wrap<MyService>(port2);
+      const remote = await wrap<MyService>(port2);
 
       try {
         // Counter is explicitly proxied via proxy() - RemoteProxy<Counter>
@@ -280,7 +280,7 @@ void suite('class instance proxying', () => {
       const {port1, port2} = new MessageChannel();
       expose(service, port1);
 
-      const remote = wrap<MyService>(port2);
+      const remote = await wrap<MyService>(port2);
 
       try {
         // Counter is proxied - RemoteProxy<Counter>

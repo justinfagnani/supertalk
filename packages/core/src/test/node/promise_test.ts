@@ -5,7 +5,7 @@ import {setupService} from './test-utils.js';
 void suite('Promise support', () => {
   void suite('Top-level promise return values', () => {
     void test('promise as return value resolves correctly', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         getAsync(): Promise<string> {
           return Promise.resolve('hello');
         },
@@ -16,7 +16,7 @@ void suite('Promise support', () => {
     });
 
     void test('promise rejection propagates correctly', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         getAsyncError(): Promise<string> {
           return Promise.reject(new Error('async error'));
         },
@@ -32,7 +32,7 @@ void suite('Promise support', () => {
     });
 
     void test('delayed promise resolves correctly', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         delayed(): Promise<number> {
           return new Promise((resolve) => {
             setTimeout(() => {
@@ -49,7 +49,7 @@ void suite('Promise support', () => {
 
   void suite('Nested promises with nestedProxies', () => {
     void test('promise in return object property', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           getData(): {name: string; value: Promise<number>} {
             return {
@@ -68,7 +68,7 @@ void suite('Promise support', () => {
     });
 
     void test('promise in return array element', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           getArray(): Array<Promise<number>> {
             return [Promise.resolve(1), Promise.resolve(2), Promise.resolve(3)];
@@ -83,7 +83,7 @@ void suite('Promise support', () => {
     });
 
     void test('multiple promises in same object', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           getMultiple(): {a: Promise<string>; b: Promise<number>} {
             return {
@@ -102,7 +102,7 @@ void suite('Promise support', () => {
     });
 
     void test('deeply nested promises', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           getNested(): {outer: {inner: Promise<string>}} {
             return {
@@ -121,7 +121,7 @@ void suite('Promise support', () => {
     });
 
     void test('promise rejection in nested object', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           getWithError(): {data: Promise<string>} {
             return {
@@ -146,7 +146,7 @@ void suite('Promise support', () => {
   void suite('Promise as argument', () => {
     void test('promise as argument is proxied and can be awaited by receiver', async () => {
       let wasReceived = false;
-      using ctx = setupService({
+      await using ctx = await setupService({
         async receivePromise(promiseValue: Promise<number>): Promise<string> {
           wasReceived = true;
           const value = await promiseValue;
@@ -164,7 +164,7 @@ void suite('Promise support', () => {
     });
 
     void test('promise rejection in argument propagates to receiver', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         async receivePromise(promiseValue: Promise<number>): Promise<string> {
           try {
             await promiseValue;
@@ -184,7 +184,7 @@ void suite('Promise support', () => {
 
   void suite('Debug mode for promises', () => {
     void test('nested promise in manual mode throws NonCloneableError', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           getData(): {value: Promise<number>} {
             return {
@@ -209,7 +209,7 @@ void suite('Promise support', () => {
 
   void suite('Promise chaining', () => {
     void test('promise resolving to another promise-like value', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         getChained(): Promise<{result: string}> {
           return Promise.resolve({result: 'chained'});
         },
@@ -220,7 +220,7 @@ void suite('Promise support', () => {
     });
 
     void test('async method with multiple awaits', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         async multiStep(): Promise<number> {
           const a = await Promise.resolve(10);
           const b = await Promise.resolve(20);

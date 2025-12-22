@@ -102,36 +102,59 @@ type Remote<T> = {
 
 ## Message Protocol
 
-> **TODO**: Define message format
-
-Messages between endpoints:
+Messages between endpoints follow a request/response pattern:
 
 ```typescript
 type Message =
   | CallMessage // Method invocation
   | ReturnMessage // Successful return
-  | ErrorMessage // Error return
-  | ProxyMessage // Create/release proxy
-  | StreamMessage // Stream chunk/end
-  | SignalMessage; // Signal update
+  | ThrowMessage // Error return
+  | ReleaseMessage // Release a proxy
+  | PromiseResolve // Resolve a proxied promise
+  | PromiseReject; // Reject a proxied promise
+```
+
+### Initialization Handshake
+
+When a connection is established:
+
+1. `expose()` registers the root service and immediately sends a `ReturnMessage` with `id: 0` containing the root proxy
+2. `wrap()` returns a `Promise<Remote<T>>` that resolves when the `id: 0` message arrives
+3. If initialization fails, `expose()` sends a `ThrowMessage` with `id: 0`, and `wrap()` rejects
+
+This handshake:
+
+- Ensures the service is ready before calls are made
+- Surfaces worker initialization errors to the caller
+- Treats the root service as a normal proxy (not a special case)
+
+```typescript
+// expose() sends immediately after setup:
+{ type: 'return', id: 0, value: { __supertalk_type__: 'proxy', proxyId: 0 } }
+
+// Or on error:
+{ type: 'throw', id: 0, error: { name: 'Error', message: '...' } }
 ```
 
 ### Message IDs
 
-Each request has a unique ID for correlating responses:
+- `id: 0` is reserved for the initialization handshake
+- Subsequent message IDs start from 1 and increment
 
 ```typescript
 interface CallMessage {
   type: 'call';
-  id: string;
-  path: PropertyKey[];
-  args: unknown[];
+  id: number;
+  target: number; // Proxy ID (0 = root service)
+  action: 'call' | 'get';
+  method?: string;
+  args: WireValue[];
 }
 
 interface ReturnMessage {
   type: 'return';
-  id: string;
-  value: unknown;
+  id: number;
+  value: WireValue;
 }
 ```
 

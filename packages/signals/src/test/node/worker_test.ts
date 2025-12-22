@@ -13,7 +13,7 @@ import {createWorker, waitForWorker} from './worker-utils.js';
 void suite('@supertalk/signals (worker)', () => {
   void suite('Signal transfer', () => {
     void test('Signal.State is transferred with initial value', async () => {
-      using ctx = createWorker('counter');
+      await using ctx = await createWorker('counter');
       const count = await ctx.remote.getCount();
 
       // Should receive a RemoteSignal, not a Signal.State
@@ -26,14 +26,14 @@ void suite('@supertalk/signals (worker)', () => {
     });
 
     void test('Signal.Computed is transferred with computed value', async () => {
-      using ctx = createWorker('computed');
+      await using ctx = await createWorker('computed');
       const doubled = await ctx.remote.getDoubled();
 
       assert.strictEqual(doubled.get(), 0);
     });
 
     void test('multiple signals can be transferred', async () => {
-      using ctx = createWorker('multi');
+      await using ctx = await createWorker('multi');
       const a = await ctx.remote.getA();
       const b = await ctx.remote.getB();
       const sum = await ctx.remote.getSum();
@@ -46,7 +46,7 @@ void suite('@supertalk/signals (worker)', () => {
 
   void suite('Signal updates', () => {
     void test('updates propagate to receiver', async () => {
-      using ctx = createWorker('counter');
+      await using ctx = await createWorker('counter');
       const count = await ctx.remote.getCount();
       assert.strictEqual(count.get(), 0);
 
@@ -60,7 +60,7 @@ void suite('@supertalk/signals (worker)', () => {
     });
 
     void test('multiple updates are batched', async () => {
-      using ctx = createWorker('counter');
+      await using ctx = await createWorker('counter');
       const count = await ctx.remote.getCount();
       assert.strictEqual(count.get(), 0);
 
@@ -77,7 +77,7 @@ void suite('@supertalk/signals (worker)', () => {
     });
 
     void test('computed updates when dependency changes', async () => {
-      using ctx = createWorker('computed');
+      await using ctx = await createWorker('computed');
       const doubled = await ctx.remote.getDoubled();
       assert.strictEqual(doubled.get(), 0);
 
@@ -91,7 +91,7 @@ void suite('@supertalk/signals (worker)', () => {
 
   void suite('Signal reactivity', () => {
     void test('RemoteSignal works with local Signal.Computed', async () => {
-      using ctx = createWorker('counter');
+      await using ctx = await createWorker('counter');
       const count = await ctx.remote.getCount();
 
       // Create a local computed that depends on the remote signal
@@ -110,7 +110,7 @@ void suite('@supertalk/signals (worker)', () => {
       // Create a local signal with the same pattern
       const localCount = new Signal.State(100);
 
-      using ctx = createWorker('counter');
+      await using ctx = await createWorker('counter');
       const remoteCount = await ctx.remote.getCount();
 
       // They should be completely independent

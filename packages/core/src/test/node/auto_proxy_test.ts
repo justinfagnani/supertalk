@@ -37,7 +37,7 @@ class Counter {
 void suite('manual mode (nestedProxies: false)', () => {
   void suite('top-level values are proxied', () => {
     void test('top-level function argument is proxied', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         callMe(fn: () => string): string {
           return fn();
         },
@@ -48,7 +48,7 @@ void suite('manual mode (nestedProxies: false)', () => {
     });
 
     void test('top-level function return value is proxied', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         getGreeter(): () => string {
           return () => 'hello from remote';
         },
@@ -62,7 +62,7 @@ void suite('manual mode (nestedProxies: false)', () => {
     });
 
     void test('top-level class instance argument is proxied with proxy()', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         // When the counter is passed with proxy(), it becomes a proxy on this side.
         // Proxy methods return promises, so we must await them.
         // We use Remoted<Counter> for the parameter type since we receive
@@ -85,7 +85,7 @@ void suite('manual mode (nestedProxies: false)', () => {
     });
 
     void test('top-level class instance return value is proxied with proxy()', async () => {
-      using ctx = setupService({
+      await using ctx = await setupService({
         createCounter(): LocalProxy<Counter> {
           return proxy(new Counter());
         },
@@ -101,7 +101,7 @@ void suite('manual mode (nestedProxies: false)', () => {
   void suite('nested non-cloneable values throw (debug mode)', () => {
     void test('nested function in object argument throws', async () => {
       // debug: true enables helpful error messages with paths
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           processOptions(opts: {name: string; onChange: () => void}): void {
             opts.onChange();
@@ -132,7 +132,7 @@ void suite('manual mode (nestedProxies: false)', () => {
     });
 
     void test('nested function in array argument throws', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           processList(items: Array<() => void>): void {
             for (const fn of items) fn();
@@ -162,7 +162,7 @@ void suite('manual mode (nestedProxies: false)', () => {
     });
 
     void test('deeply nested function throws with path', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           deepProcess(data: {level1: {level2: {fn: () => void}}}): void {
             data.level1.level2.fn();
@@ -193,7 +193,7 @@ void suite('manual mode (nestedProxies: false)', () => {
     });
 
     void test('nested class instance in object argument throws', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           processWithCounter(opts: {counter: Counter}): number {
             return opts.counter.increment();
@@ -216,7 +216,7 @@ void suite('manual mode (nestedProxies: false)', () => {
     });
 
     void test('nested function in return value throws', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           getConfig(): {name: string; validate: () => boolean} {
             return {
@@ -249,7 +249,7 @@ void suite('manual mode (nestedProxies: false)', () => {
       // When a service method returns a Promise, the RPC layer awaits it
       // before sending the resolved value. This is correct behavior for
       // async methods - it's what you'd expect from RPC semantics.
-      using ctx = setupService({
+      await using ctx = await setupService({
         getPromise(): Promise<number> {
           return Promise.resolve(42);
         },
@@ -264,7 +264,7 @@ void suite('manual mode (nestedProxies: false)', () => {
       // When a method returns an object that CONTAINS a promise property,
       // in debug mode the Promise (which is a class instance) will throw
       // because nested class instances are not allowed.
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           getDataWithPromise(): {name: string; data: Promise<number>} {
             return {name: 'test', data: Promise.resolve(42)};
@@ -292,7 +292,7 @@ void suite('manual mode (nestedProxies: false)', () => {
 void suite('nested proxy mode (nestedProxies: true)', () => {
   void suite('nested values are proxied', () => {
     void test('nested function in object argument is proxied', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           processOptions(opts: {name: string; onChange: () => string}): string {
             return opts.onChange();
@@ -309,7 +309,7 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
     });
 
     void test('nested function in array argument is proxied', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           // When functions are proxied, they return promises
           async callAll(fns: Array<() => number>): Promise<number> {
@@ -328,7 +328,7 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
     });
 
     void test('deeply nested function is proxied', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           deepCall(data: {level1: {level2: {fn: () => string}}}): string {
             return data.level1.level2.fn();
@@ -344,7 +344,7 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
     });
 
     void test('nested class instance with proxy() marker is proxied', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           // When the counter is wrapped with proxy(), it's proxied and methods return promises
           async useNestedCounter(opts: {
@@ -370,7 +370,7 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
     });
 
     void test('nested function in return value is proxied', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           getWidget(): {name: string; activate: () => string} {
             return {
@@ -389,7 +389,7 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
     });
 
     void test('nested class instance with proxy() in return value is proxied', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           getCounterHolder(): {counter: LocalProxy<Counter>} {
             // Use proxy() to explicitly mark the class instance
@@ -412,7 +412,7 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
     void test('same object referenced twice yields same proxy', async () => {
       const sharedFn = () => 42;
 
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           processShared(data: {a: () => number; b: () => number}): boolean {
             // Both references should be to the same proxied function
@@ -432,7 +432,7 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
     });
 
     void test('diamond with proxy() marker preserves identity', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           checkIdentity(data: {
             a: LocalProxy<Counter>;
@@ -455,7 +455,7 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
     });
 
     void test('diamond in return value preserves identity', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           getDiamond(): {a: () => number; b: () => number} {
             const shared = () => 42;
@@ -476,7 +476,7 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
     // In nested proxy mode, Promise is not a plain object, so it gets proxied.
     // This test documents current behavior.
     void test('nested promise is proxied (not resolved)', async () => {
-      using ctx = setupService(
+      await using ctx = await setupService(
         {
           getWithPromise(): {data: Promise<number>} {
             return {data: Promise.resolve(42)};
