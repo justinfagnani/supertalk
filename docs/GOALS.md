@@ -1,8 +1,8 @@
-# supertalk Goals
+# Supertalk Goals
 
 ## Vision
 
-supertalk is a unified, type-safe communication library for all kinds of out-of-process communication in JavaScript/TypeScript applications:
+Supertalk is a unified, type-safe communication library for all kinds of out-of-process communication in JavaScript/TypeScript applications:
 
 - **Web Workers** — Main thread ↔ Worker
 - **Iframes** — Parent ↔ Child frames (same-origin and cross-origin)
@@ -128,7 +128,7 @@ Things we explicitly are NOT trying to do:
 
 ### vs Comlink
 
-| Feature           | Comlink            | supertalk                      |
+| Feature           | Comlink            | Supertalk                      |
 | ----------------- | ------------------ | ------------------------------ |
 | Basic RPC         | ✅                 | ✅                             |
 | Type safety       | Partial            | Full                           |
@@ -141,7 +141,7 @@ Things we explicitly are NOT trying to do:
 
 ### vs tRPC
 
-| Feature         | tRPC            | supertalk  |
+| Feature         | tRPC            | Supertalk  |
 | --------------- | --------------- | ---------- |
 | Type safety     | ✅              | ✅         |
 | No type imports | ❌              | ✅         |
@@ -154,7 +154,7 @@ Things we explicitly are NOT trying to do:
 
 ## Success Criteria
 
-We'll know supertalk is successful when:
+We'll know Supertalk is successful when:
 
 1. **5-line Hello World** — Simplest case is truly simple
 2. **Zero type imports from server** — Clients work without importing server code

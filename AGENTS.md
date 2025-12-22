@@ -1,8 +1,8 @@
-# Agent Instructions for supertalk
+# Agent Instructions for Supertalk
 
 ## Project Overview
 
-**supertalk** is a type-safe, unified client/server communication library for:
+**Supertalk** is a type-safe, unified client/server communication library for:
 
 - Web Workers
 - Iframes
@@ -137,7 +137,7 @@ This library is not yet released. We prioritize clean APIs and minimal code size
 
 ### No Global Configuration
 
-Unlike Comlink's global `transferHandlers` map, supertalk has no global state. All configuration is scoped to individual connections via options to `expose()` and `wrap()`.
+Unlike Comlink's global `transferHandlers` map, Supertalk has no global state. All configuration is scoped to individual connections via options to `expose()` and `wrap()`.
 
 ### Explicit `proxy()` for Type-Safe Proxying
 

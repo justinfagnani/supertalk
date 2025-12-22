@@ -21,17 +21,20 @@
     "build": {
       "dependencies": [
         "./packages/core:build",
-        "./packages/supertalk:build"
+        "./packages/supertalk:build",
+        "./packages/signals:build"
       ]
     },
     "test": {
       "dependencies": [
-        "./packages/core:test"
+        "./packages/core:test",
+        "./packages/signals:test"
       ]
     },
     "test:node": {
       "dependencies": [
-        "./packages/core:test:node"
+        "./packages/core:test:node",
+        "./packages/signals:test:node"
       ]
     },
     "test:browser": {

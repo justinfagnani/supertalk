@@ -1,10 +1,10 @@
-# supertalk Architecture
+# Supertalk Architecture
 
 > **Status**: Draft — To be expanded as design solidifies
 
 ## Overview
 
-supertalk is structured in layers:
+Supertalk is structured in layers:
 
 ```
 ┌─────────────────────────────────────────────────────────┐

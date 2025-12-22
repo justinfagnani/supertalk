@@ -127,7 +127,7 @@ export function isTransferMarker(
 // ============================================================
 
 /**
- * Check if a value is a proxy property created by supertalk.
+ * Check if a value is a proxy property created by Supertalk.
  * These are branded with a symbol containing metadata about the target proxy.
  */
 export function isProxyProperty(

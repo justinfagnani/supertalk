@@ -1,5 +1,5 @@
 /**
- * Benchmarks comparing supertalk vs Comlink performance.
+ * Benchmarks comparing Supertalk vs Comlink performance.
  *
  * Run with: npm run bench -w @supertalk/core
  *

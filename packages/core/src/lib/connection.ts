@@ -1,6 +1,6 @@
 /**
  * Connection class - manages state and communication for both sides of a
- * supertalk connection.
+ * Supertalk connection.
  *
  * This file contains:
  * - Connection class with proxy lifecycle management
@@ -68,7 +68,7 @@ interface ProxyProperty {
 }
 
 /**
- * Unified connection state and logic for supertalk.
+ * Unified connection state and logic for Supertalk.
  *
  * Both sides of a connection use the same Connection class.
  * The only difference is initialization:

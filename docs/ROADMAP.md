@@ -1,4 +1,4 @@
-# supertalk Implementation Roadmap
+# Supertalk Implementation Roadmap
 
 ## Overview
 
@@ -155,7 +155,7 @@ const docs = await users.find({});
 
 ### Design Principle: No Global Configuration
 
-Unlike Comlink which uses a global `transferHandlers` map, supertalk configures
+Unlike Comlink which uses a global `transferHandlers` map, Supertalk configures
 all behavior per-connection via options to `expose()` and `wrap()`.
 
 ### Deliverables
@@ -457,7 +457,7 @@ const result = await api.doSomething();
 ### ArrayBuffer and other built-in types are proxied instead of cloned
 
 **Problem**: `ArrayBuffer`, `TypedArray`, `Date`, `RegExp`, `Map`, `Set`, etc. are
-all structured-clone-compatible, but supertalk proxies them because they're not
+all structured-clone-compatible, but Supertalk proxies them because they're not
 "plain objects" (their prototype isn't `Object.prototype`).
 
 **Impact**: Sending an ArrayBuffer creates a proxy and requires an extra round-trip

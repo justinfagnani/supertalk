@@ -1,5 +1,5 @@
 /**
- * Core type definitions for supertalk.
+ * Core type definitions for Supertalk.
  *
  * This file contains:
  * - Type definitions and interfaces (Endpoint, Options, Message, etc.)
@@ -92,14 +92,17 @@ export type RemoteProxy<T> = {
 // ============================================================
 
 /**
- * Converts a type T to its "remote" version where all methods return Promises.
+ * Converts a type T to its "remote" version where methods return Promises
+ * and properties become Promise-wrapped.
  *
  * Use this type for the return value of `wrap()`. Methods become async,
- * and return values are transformed via `Remoted<T>`.
+ * return values are transformed via `Remoted<T>`, and non-function properties
+ * become Promises.
  *
  * @example
  * ```ts
  * interface MyService {
+ *   readonly count: number;
  *   add(a: number, b: number): number;
  *   createWidget(): LocalProxy<Widget>;
  *   getData(): { value: number };
@@ -107,6 +110,7 @@ export type RemoteProxy<T> = {
  *
  * const remote = wrap<MyService>(worker);
  * // Remote<MyService> = {
+ * //   count: Promise<number>;
  * //   add(a: number, b: number): Promise<number>;
  * //   createWidget(): Promise<RemoteProxy<Widget>>;
  * //   getData(): Promise<{ value: number }>;
@@ -114,11 +118,9 @@ export type RemoteProxy<T> = {
  * ```
  */
 export type Remote<T> = {
-  [K in keyof T as T[K] extends AnyFunction ? K : never]: T[K] extends (
-    ...args: infer A
-  ) => infer R
-    ? (...args: A) => Promise<Awaited<Remoted<R>>>
-    : never;
+  [K in keyof T]: T[K] extends AnyFunction
+    ? (...args: Parameters<T[K]>) => Promise<Awaited<Remoted<ReturnType<T[K]>>>>
+    : Promise<Awaited<Remoted<T[K]>>>;
 };
 
 /**
@@ -134,11 +136,11 @@ export type Remote<T> = {
  * ```
  */
 export type RemoteNested<T> = {
-  [K in keyof T as T[K] extends AnyFunction ? K : never]: T[K] extends (
-    ...args: infer A
-  ) => infer R
-    ? (...args: RemotedArgs<A>) => Promise<Awaited<Remoted<R>>>
-    : never;
+  [K in keyof T]: T[K] extends AnyFunction
+    ? (
+        ...args: RemotedArgs<Parameters<T[K]>>
+      ) => Promise<Awaited<Remoted<ReturnType<T[K]>>>>
+    : Promise<Awaited<Remoted<T[K]>>>;
 };
 
 /**

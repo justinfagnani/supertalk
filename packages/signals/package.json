@@ -1,0 +1,77 @@
+{
+  "name": "@supertalk/signals",
+  "version": "0.0.1",
+  "description": "TC39 Signals integration for Supertalk",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "index.d.ts.map",
+    "index.js.map",
+    "lib"
+  ],
+  "scripts": {
+    "build": "wireit",
+    "test": "wireit",
+    "test:node": "wireit"
+  },
+  "wireit": {
+    "build": {
+      "command": "tsc --build --pretty",
+      "files": [
+        "src/**/*.ts",
+        "tsconfig.json",
+        "../../tsconfig.base.json"
+      ],
+      "output": [
+        "index.*",
+        "lib/**",
+        "test/**",
+        ".tsbuildinfo"
+      ],
+      "clean": "if-file-deleted"
+    },
+    "test": {
+      "dependencies": [
+        "test:node"
+      ]
+    },
+    "test:node": {
+      "command": "node --test test/node/*_test.js",
+      "dependencies": [
+        "build"
+      ],
+      "files": [],
+      "output": []
+    }
+  },
+  "keywords": [
+    "signals",
+    "tc39",
+    "reactive",
+    "Supertalk"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/user/supertalk.git",
+    "directory": "packages/signals"
+  },
+  "dependencies": {
+    "@supertalk/core": "^0.0.1"
+  },
+  "peerDependencies": {
+    "signal-polyfill": "^0.2.0"
+  },
+  "devDependencies": {
+    "signal-polyfill": "^0.2.0",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,4 +1,4 @@
-# supertalk API Design
+# Supertalk API Design
 
 > **Status**: Exploration — This document explores API options before implementation
 

@@ -49,7 +49,7 @@ void suite('wire value edge cases', () => {
     assert.deepStrictEqual(result5, maliciousProxyProp);
   });
 
-  void test('user object with supertalk-like properties should not confuse markers', async () => {
+  void test('user object with Supertalk-like properties should not confuse markers', async () => {
     // This tests that nested markers require the correct type AND payload property
     using ctx = setupService({
       echo<T>(value: T): T {

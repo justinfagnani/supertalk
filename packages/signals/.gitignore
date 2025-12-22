@@ -1,0 +1,10 @@
+# Build outputs (at package root, not in src/)
+/index.js
+/index.d.ts
+/index.d.ts.map
+/index.js.map
+/lib/
+/test/
+.tsbuildinfo
+.wireit/
+node_modules/
