@@ -309,49 +309,15 @@ await proxy.processData(fetchDataLocally()); // Promise proxied, resolved when s
 
 ---
 
-## Phase 5: Decorators
-
-**Goal**: Declarative service definition
-
-### Deliverables
-
-- [ ] `@service()` class decorator
-- [ ] `@method()` method decorator
-- [ ] Metadata storage system
-- [ ] Decorator-based expose
-
-### API Shape
-
-```typescript
-@service()
-class Calculator {
-  @method()
-  add(a: number, b: number): number {
-    return a + b;
-  }
-}
-
-expose(new Calculator(), self);
-```
-
-### Tests
-
-- [ ] Decorated class exposure
-- [ ] Method filtering
-- [ ] Decorator options
-- [ ] Inheritance handling
-
----
-
-## Phase 6: Streams
+## Phase 5: Streams ✅
 
 **Goal**: Transfer ReadableStream/WritableStream
 
 ### Deliverables
 
-- [ ] Stream detection
-- [ ] Stream transfer via transferable
-- [ ] Async iterable support
+- [x] Stream detection
+- [x] Stream transfer via transferable
+- [x] Async iterable support
 - [ ] Backpressure handling
 
 ### API Shape
@@ -376,16 +342,18 @@ for await (const chunk of stream) {
 
 ### Tests
 
-- [ ] Stream transfer
-- [ ] Async iteration
+- [x] Stream transfer
+- [x] Async iteration
 - [ ] Large data streaming
 - [ ] Stream cancellation
 
 ---
 
-## Phase 7: Signals Integration
+## Phase 6: Signals Integration (Next)
 
 **Goal**: Reactive state across boundaries
+
+**Package**: `@supertalk/signals` (add-on package)
 
 ### Deliverables
 
@@ -427,7 +395,7 @@ await proxy.increment(); // Effect runs
 
 ---
 
-## Phase 8: HTTP Transport
+## Phase 7: HTTP Transport
 
 **Goal**: Browser-to-server RPC
 
@@ -458,7 +426,7 @@ const result = await api.doSomething();
 
 ---
 
-## Phase 9: Advanced Features
+## Phase 8: Advanced Features
 
 **Goal**: Polish and advanced use cases
 
@@ -474,6 +442,7 @@ const result = await api.doSomething();
 
 ## Future Considerations
 
+- **Decorators** — Declarative service definition (`@service()`, `@method()`). Deferred until we have a clearer idea of what value they add.
 - WebSocket transport
 - Node.js worker threads
 - SharedArrayBuffer integration
