@@ -126,6 +126,15 @@ When you discover something worth recording (coding patterns, implementation det
 
 ## Key Design Decisions
 
+### Pre-Release: No Backwards Compatibility
+
+This library is not yet released. We prioritize clean APIs and minimal code size over backwards compatibility. Feel free to:
+
+- Remove deprecated methods
+- Rename or refactor freely
+- Consolidate redundant APIs
+- Break changes without migration paths
+
 ### No Global Configuration
 
 Unlike Comlink's global `transferHandlers` map, supertalk has no global state. All configuration is scoped to individual connections via options to `expose()` and `wrap()`.

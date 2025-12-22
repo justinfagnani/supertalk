@@ -3,7 +3,7 @@
  *
  * This file contains:
  * - `proxy()` function for explicit proxy marking
- * - Detection helpers (isPromise, isPlainObject, isLocalProxy, etc.)
+ * - Detection helpers (isPromise, isLocalProxy, etc.)
  * - Error serialization/deserialization
  * - NonCloneableError for debug mode
  *
@@ -17,7 +17,7 @@ import type {
   ProxyPropertyMetadata,
   LocalProxy,
 } from './types.js';
-import {LOCAL_PROXY, PROXY_PROPERTY_BRAND} from './constants.js';
+import {LOCAL_PROXY, PROXY_PROPERTY_BRAND, TRANSFER} from './constants.js';
 
 // ============================================================
 // Proxy marker
@@ -74,6 +74,55 @@ export function isLocalProxy(value: unknown): value is LocalProxy<unknown> {
 }
 
 // ============================================================
+// Transfer marker
+// ============================================================
+
+/**
+ * A value marked for transfer when sent across the wire.
+ *
+ * Transferred values are moved (not copied) — faster for large buffers,
+ * but the original becomes unusable (neutered).
+ */
+export interface TransferMarker<T extends Transferable> {
+  readonly [TRANSFER]: true;
+  readonly value: T;
+}
+
+/**
+ * Mark a value for transfer across the wire.
+ *
+ * Transferred values are moved (not copied) using postMessage's transfer list.
+ * This is faster for large data but neuters the original.
+ *
+ * @example
+ * ```ts
+ * const service = {
+ *   getBuffer(): ArrayBuffer {
+ *     const buf = new ArrayBuffer(1024 * 1024);
+ *     fillBuffer(buf);
+ *     return transfer(buf);  // Move, don't copy
+ *   }
+ * };
+ * ```
+ */
+export function transfer<T extends Transferable>(value: T): TransferMarker<T> {
+  return {[TRANSFER]: true, value};
+}
+
+/**
+ * Check if a value is a TransferMarker.
+ */
+export function isTransferMarker(
+  value: unknown,
+): value is TransferMarker<Transferable> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Object.hasOwn(value, TRANSFER)
+  );
+}
+
+// ============================================================
 // Detection helpers
 // ============================================================
 
@@ -96,18 +145,6 @@ export function isProxyProperty(
  */
 export function isPromise(value: unknown): value is Promise<unknown> {
   return typeof (value as PromiseLike<unknown> | null)?.then === 'function';
-}
-
-/**
- * Check if an object is a plain object (prototype is null or Object.prototype).
- * Plain objects are cloned; class instances are proxied.
- */
-export function isPlainObject(value: unknown): boolean {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  const proto = Object.getPrototypeOf(value) as unknown;
-  return proto === null || proto === Object.prototype;
 }
 
 /**

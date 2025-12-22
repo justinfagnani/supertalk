@@ -1,10 +1,10 @@
 /**
- * Tests for class instance proxying.
+ * Tests for class instance proxying with explicit proxy() marker.
  *
- * Class instances are proxied (not cloned) because they:
- * - Have identity
- * - Have methods that need to execute in their original context
- * - May have internal state (#private fields, closures)
+ * Class instances require explicit proxy() because:
+ * - TypeScript can't express the type transformation without it
+ * - It's explicit about intent (proxied vs cloned)
+ * - Class instances passed to structured clone lose their prototype
  */
 
 import {suite, test} from 'node:test';
@@ -39,13 +39,13 @@ class Counter {
 class Database {
   #collections = new Map<string, Collection>();
 
-  collection(name: string): Collection {
+  collection(name: string): LocalProxy<Collection> {
     let coll = this.#collections.get(name);
     if (!coll) {
       coll = new Collection(name);
       this.#collections.set(name, coll);
     }
-    return coll;
+    return proxy(coll);
   }
 }
 
@@ -78,8 +78,8 @@ void suite('class instance proxying', () => {
   void suite('basic class instances', () => {
     void test('returned class instance is proxied', async () => {
       using ctx = setupService({
-        createCounter(name: string): Counter {
-          return new Counter(name);
+        createCounter(name: string): LocalProxy<Counter> {
+          return proxy(new Counter(name));
         },
       });
 
@@ -92,8 +92,8 @@ void suite('class instance proxying', () => {
 
     void test('class instance methods maintain state', async () => {
       using ctx = setupService({
-        createCounter(name: string, initial: number): Counter {
-          return new Counter(name, initial);
+        createCounter(name: string, initial: number): LocalProxy<Counter> {
+          return proxy(new Counter(name, initial));
         },
       });
 
@@ -107,8 +107,8 @@ void suite('class instance proxying', () => {
 
     void test('class instance property access', async () => {
       using ctx = setupService({
-        createCounter(name: string): Counter {
-          return new Counter(name);
+        createCounter(name: string): LocalProxy<Counter> {
+          return proxy(new Counter(name));
         },
       });
 
@@ -123,8 +123,8 @@ void suite('class instance proxying', () => {
 
     void test('class instance getter access', async () => {
       using ctx = setupService({
-        createCounter(name: string, initial: number): Counter {
-          return new Counter(name, initial);
+        createCounter(name: string, initial: number): LocalProxy<Counter> {
+          return proxy(new Counter(name, initial));
         },
       });
 
@@ -141,29 +141,26 @@ void suite('class instance proxying', () => {
   void suite('chained method calls', () => {
     void test('method returning another class instance', async () => {
       using ctx = setupService({
-        getDatabase(): Database {
-          return new Database();
+        getDatabase(): LocalProxy<Database> {
+          return proxy(new Database());
         },
       });
 
-      // Remoted<Database> correctly types db.collection() as returning
-      // Promise<Remoted<Collection>>, which has async methods
+      // getDatabase returns RemoteProxy<Database>
+      // db.collection() returns Promise<RemoteProxy<Collection>>
       const db = await ctx.remote.getDatabase();
       const users = await db.collection('users');
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- Remoted transforms methods
       await users.insert('1', {name: 'Alice'});
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- Remoted transforms methods
       await users.insert('2', {name: 'Bob'});
 
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- Remoted transforms methods
       assert.strictEqual(await users.count(), 2);
       assert.deepStrictEqual(await users.find('1'), {name: 'Alice'});
     });
 
     void test('deeply nested class instances', async () => {
       using ctx = setupService({
-        getDatabase(): Database {
-          return new Database();
+        getDatabase(): LocalProxy<Database> {
+          return proxy(new Database());
         },
       });
 
@@ -180,8 +177,8 @@ void suite('class instance proxying', () => {
       const sharedCounter = new Counter('shared', 100);
 
       using ctx = setupService({
-        getCounter(): Counter {
-          return sharedCounter;
+        getCounter(): LocalProxy<Counter> {
+          return proxy(sharedCounter);
         },
       });
 

@@ -7,6 +7,10 @@
     ".": {
       "types": "./index.d.ts",
       "default": "./index.js"
+    },
+    "./handlers/streams.js": {
+      "types": "./handlers/streams.d.ts",
+      "default": "./handlers/streams.js"
     }
   },
   "files": [
@@ -14,7 +18,8 @@
     "index.d.ts",
     "index.d.ts.map",
     "index.js.map",
-    "lib"
+    "lib",
+    "handlers"
   ],
   "scripts": {
     "build": "wireit",
@@ -35,6 +40,7 @@
       "output": [
         "index.*",
         "lib/**",
+        "handlers/**",
         "test/**",
         "bench/**",
         ".tsbuildinfo"

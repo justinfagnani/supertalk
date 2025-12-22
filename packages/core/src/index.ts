@@ -13,11 +13,12 @@ export {expose} from './lib/expose.js';
 export {wrap} from './lib/wrap.js';
 export {Connection} from './lib/connection.js';
 
-// Proxy marker
-export {proxy} from './lib/protocol.js';
+// Proxy and transfer markers
+export {proxy, transfer} from './lib/protocol.js';
+export type {TransferMarker} from './lib/protocol.js';
 
 // Utilities
-export {isPlainObject, NonCloneableError} from './lib/protocol.js';
+export {NonCloneableError} from './lib/protocol.js';
 
 // Types
 export type {
@@ -29,7 +30,15 @@ export type {
   RemoteProxy,
   Message,
   WireValue,
+  WireProxy,
+  WirePromise,
   Options,
   NestedProxyOptions,
   ShallowOptions,
+  Handler,
+  ToWireContext,
+  FromWireContext,
 } from './lib/types.js';
+
+// Re-export WIRE_TYPE for handlers that need to construct wire values
+export {WIRE_TYPE} from './lib/constants.js';

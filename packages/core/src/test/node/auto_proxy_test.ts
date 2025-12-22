@@ -5,7 +5,8 @@
  * nested proxy mode (nestedProxies: true).
  *
  * In manual mode:
- * - Top-level functions and class instances are proxied
+ * - Top-level functions are auto-proxied
+ * - Class instances require explicit proxy() markers
  * - Nested functions/class instances throw NonCloneableError
  *
  * In nested proxy mode:
@@ -60,9 +61,9 @@ void suite('manual mode (nestedProxies: false)', () => {
       assert.strictEqual(result, 'hello from remote');
     });
 
-    void test('top-level class instance argument is proxied', async () => {
+    void test('top-level class instance argument is proxied with proxy()', async () => {
       using ctx = setupService({
-        // When the counter is passed, it becomes a proxy on this side.
+        // When the counter is passed with proxy(), it becomes a proxy on this side.
         // Proxy methods return promises, so we must await them.
         // We use Remoted<Counter> for the parameter type since we receive
         // a proxy, not the original counter.
@@ -74,19 +75,19 @@ void suite('manual mode (nestedProxies: false)', () => {
       });
 
       const counter = new Counter();
-      // Type assertion needed: we pass Counter, service receives Remoted<Counter>
+      // Use proxy() to explicitly proxy the class instance
       const result = await ctx.remote.useCounter(
-        counter as unknown as Remoted<Counter>,
+        proxy(counter) as unknown as Remoted<Counter>,
       );
       // The proxy calls back to our local counter
       assert.strictEqual(result, 2);
       assert.strictEqual(counter.value, 2);
     });
 
-    void test('top-level class instance return value is proxied', async () => {
+    void test('top-level class instance return value is proxied with proxy()', async () => {
       using ctx = setupService({
-        createCounter(): Counter {
-          return new Counter();
+        createCounter(): LocalProxy<Counter> {
+          return proxy(new Counter());
         },
       });
 

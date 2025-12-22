@@ -83,7 +83,7 @@ export interface LocalProxy<T> {
  */
 export type RemoteProxy<T> = {
   [K in keyof T]: T[K] extends AnyFunction
-    ? (...args: Parameters<T[K]>) => Promise<Awaited<ReturnType<T[K]>>>
+    ? (...args: Parameters<T[K]>) => Promise<Awaited<Remoted<ReturnType<T[K]>>>>
     : Promise<Awaited<T[K]>>;
 };
 
@@ -295,6 +295,21 @@ export interface Options {
    * @default false
    */
   debug?: boolean;
+
+  /**
+   * Custom handlers for serialization/deserialization.
+   *
+   * Handlers are checked in order during serialization. First handler whose
+   * `canHandle()` returns true wins. Both sides of a connection must use
+   * compatible handlers.
+   *
+   * @example
+   * ```ts
+   * expose(service, endpoint, { handlers: [mapHandler, streamHandler] });
+   * wrap<Service>(endpoint, { handlers: [mapHandler, streamHandler] });
+   * ```
+   */
+  handlers?: Array<Handler>;
 }
 
 /**
@@ -368,4 +383,85 @@ export function isWirePromise(value: unknown): value is WirePromise {
 export interface ProxyPropertyMetadata {
   targetProxyId: number;
   property: string;
+}
+
+// ============================================================
+// Handler types
+// ============================================================
+
+/**
+ * Context provided to handler toWire methods.
+ *
+ * Handlers use `toWire()` to convert nested values. Combine with
+ * the public marker APIs for special handling:
+ * - `ctx.toWire(proxy(obj))` — proxy an object
+ * - `ctx.toWire(transfer(stream))` — transfer a transferable
+ * - `ctx.toWire(value, key)` — process with path tracking
+ */
+export interface ToWireContext {
+  /**
+   * Recursively convert a nested value to wire format.
+   * Applies handlers and default behavior, returns wire-safe value.
+   * @param value - The value to convert (may be wrapped with proxy()/transfer())
+   * @param key - Optional key/index for error path building (e.g., 'key', '0')
+   */
+  toWire(value: unknown, key?: string | number): WireValue;
+}
+
+/**
+ * Context provided to handler fromWire methods.
+ */
+export interface FromWireContext {
+  /**
+   * Recursively convert a nested wire value back to its original form.
+   * Handles proxies, promises, and nested handler values.
+   */
+  fromWire(wire: WireValue): unknown;
+}
+
+/**
+ * A pluggable handler for custom serialization/deserialization.
+ *
+ * Handlers can transform values during wire transmission. Use cases:
+ * - Collections: Maps, Sets as proxies or cloned
+ * - Streams: ReadableStream/WritableStream transferred
+ * - Custom types: Domain-specific serialization
+ *
+ * @typeParam T - The type this handler handles (e.g., Map<K, V>)
+ * @typeParam W - The wire format type (must extend object with WIRE_TYPE)
+ */
+export interface Handler<T = unknown, W extends object = object> {
+  /**
+   * Unique wire type identifier for this handler.
+   * Used to route deserialization. Convention: 'handler:<name>' or 'transfer:<name>'
+   */
+  wireType: string;
+
+  /**
+   * Fast check if this handler applies to a value.
+   * Called during serialization. Return true to handle, false to skip.
+   * First registered handler that returns true wins.
+   */
+  canHandle(value: unknown): value is T;
+
+  /**
+   * Convert the value to wire format.
+   *
+   * Use context methods to build wire values:
+   * - ctx.process(proxy(value)) — proxy the value
+   * - ctx.process(value, key) — recursively process nested values
+   * - ctx.process(transfer(value)) — add to transfer list
+   *
+   * Return either:
+   * - A wire value from a context method
+   * - A custom wire object with [WIRE_TYPE] set to this handler's wireType
+   */
+  toWire(value: T, ctx: ToWireContext): WireValue;
+
+  /**
+   * Convert a value from wire format.
+   * Only called for values with matching wireType.
+   * Optional — not needed for proxied or transferred values.
+   */
+  fromWire?(wire: W, ctx: FromWireContext): T;
 }

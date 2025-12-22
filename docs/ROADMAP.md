@@ -73,7 +73,7 @@ const result = await proxy.add(1, 2); // 3
 - [x] Memory management with WeakRef/FinalizationRegistry
 - [x] Explicit release API (via ReleaseMessage)
 - [x] Unified CallMessage with target ID (0 = root service)
-- [x] isPlainObject detection for clone vs proxy decision
+- [x] Plain object detection for clone vs pass-through decision
 
 ### API Shape
 

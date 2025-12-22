@@ -20,6 +20,11 @@ export const WIRE_TYPE = '__supertalk_type__';
 export const LOCAL_PROXY = Symbol('supertalk.localProxy');
 
 /**
+ * Symbol used to brand transfer markers.
+ */
+export const TRANSFER = Symbol('supertalk.transfer');
+
+/**
  * Reserved target ID for the root service.
  */
 export const ROOT_TARGET = 0;

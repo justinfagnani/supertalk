@@ -4,7 +4,7 @@
  *
  * This file contains:
  * - Connection class with proxy lifecycle management
- * - Wire value serialization/deserialization (toWireValue/fromWireValue)
+ * - Wire value serialization/deserialization (#toWire/#fromWire)
  * - Message handling and dispatch
  * - Proxy creation and release tracking
  *
@@ -20,18 +20,31 @@ import type {
   WireThrown,
   Options,
   ProxyPropertyMetadata,
+  Handler,
+  ToWireContext,
+  FromWireContext,
 } from './types.js';
 import {isWireProxy, isWirePromise} from './types.js';
-import {PROXY_PROPERTY_BRAND, WIRE_TYPE, LOCAL_PROXY} from './constants.js';
+import {PROXY_PROPERTY_BRAND, WIRE_TYPE} from './constants.js';
 import {
   isLocalProxy,
   isProxyProperty,
   isPromise,
-  isPlainObject,
+  isTransferMarker,
   serializeError,
   deserializeError,
   NonCloneableError,
 } from './protocol.js';
+
+/**
+ * Check if a value is a plain object (prototype is null or Object.prototype).
+ * Used to decide whether to traverse for nested markers vs pass through to
+ * structured clone.
+ */
+function isPlainObject(value: object): boolean {
+  const proto = Object.getPrototypeOf(value) as unknown;
+  return proto === null || proto === Object.prototype;
+}
 
 /**
  * Pending call waiting for a response.
@@ -66,6 +79,8 @@ export class Connection {
   #endpoint: Endpoint;
   #nestedProxies: boolean;
   #debug: boolean;
+  #handlers: Array<Handler>;
+  #handlersByWireType = new Map<string, Handler>();
 
   // Registry for local objects we expose to remote (strong refs)
   // ID counter for local objects (remote IDs come from the wire)
@@ -93,6 +108,12 @@ export class Connection {
     this.#endpoint = endpoint;
     this.#nestedProxies = options.nestedProxies ?? false;
     this.#debug = options.debug ?? false;
+    this.#handlers = options.handlers ?? [];
+
+    // Build handler lookup map
+    for (const handler of this.#handlers) {
+      this.#handlersByWireType.set(handler.wireType, handler);
+    }
 
     // Set up finalization registry to notify remote when proxies are GC'd
     this.#remoteCleanup = new FinalizationRegistry((proxyId: number) => {
@@ -197,7 +218,11 @@ export class Connection {
   /**
    * Serialize a value for transmission.
    */
-  toWireValue(value: unknown): WireValue {
+  #toWire(
+    value: unknown,
+    path: string,
+    transfers: Array<Transferable>,
+  ): WireValue {
     // Check for proxy properties first
     if (isProxyProperty(value)) {
       const metadata = value[PROXY_PROPERTY_BRAND];
@@ -208,25 +233,20 @@ export class Connection {
       };
     }
 
-    // LocalProxy markers are explicitly proxied
-    if (isLocalProxy(value)) {
-      const obj = value.value as object;
-      const existingId = this.#getRemoteId(obj);
-      if (existingId !== undefined) {
-        return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
-      }
-      const proxyId = this.#registerLocal(obj);
-      return {[WIRE_TYPE]: 'proxy', proxyId};
+    // Transfer markers: add to transfer list and return raw value
+    if (isTransferMarker(value)) {
+      transfers.push(value.value);
+      return value.value;
     }
 
-    // Functions are always proxied at top level
+    // LocalProxy markers are explicitly proxied
+    if (isLocalProxy(value)) {
+      return this.#makeProxyWire(value.value as object);
+    }
+
+    // Functions are always proxied
     if (typeof value === 'function') {
-      const existingId = this.#getRemoteId(value as object);
-      if (existingId !== undefined) {
-        return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
-      }
-      const proxyId = this.#registerLocal(value as object);
-      return {[WIRE_TYPE]: 'proxy', proxyId};
+      return this.#makeProxyWire(value as object);
     }
 
     // Null and primitives are sent directly
@@ -240,41 +260,86 @@ export class Connection {
       return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
     }
 
-    // Promises get special handling at top level
+    // Promises get special handling
     if (isPromise(value)) {
-      const promiseId = this.#registerPromise(value);
-      return {[WIRE_TYPE]: 'promise', promiseId};
+      return this.#makePromiseWire(value);
     }
 
-    // Arrays: only traverse if nestedProxies or debug is enabled
+    // Check handlers (if any)
+    if (this.#handlers.length > 0) {
+      for (const handler of this.#handlers) {
+        if (handler.canHandle(value)) {
+          const ctx = this.#createToWireContext(path, transfers);
+          return handler.toWire(value, ctx);
+        }
+      }
+    }
+
+    // Arrays: only traverse if nestedProxies, debug, or handlers exist
     if (Array.isArray(value)) {
-      if (this.#nestedProxies || this.#debug) {
+      if (this.#nestedProxies || this.#debug || this.#handlers.length > 0) {
         return value.map((item, index) =>
-          this.#processForClone(item, `[${String(index)}]`),
+          this.#processForClone(item, `${path}[${String(index)}]`, transfers),
         );
       }
       return value;
     }
 
-    // Plain objects: only traverse if nestedProxies or debug is enabled
+    // Plain objects: only traverse if nestedProxies, debug, or handlers exist
     if (isPlainObject(value)) {
-      if (this.#nestedProxies || this.#debug) {
+      if (this.#nestedProxies || this.#debug || this.#handlers.length > 0) {
         const processed: Record<string, unknown> = {};
         for (const key of Object.keys(value)) {
           processed[key] = this.#processForClone(
             (value as Record<string, unknown>)[key],
-            key,
+            path ? `${path}.${key}` : key,
+            transfers,
           );
         }
         return processed;
       }
-      return value;
     }
 
-    // Class instances in shallow mode: proxy the whole thing
-    // In nested mode, non-plain objects require explicit proxy() marker
+    // Everything else (class instances, Date, RegExp, etc.): let structured
+    // clone handle it. Users can use proxy() to explicitly proxy if needed.
+    return value;
+  }
+
+  /**
+   * Create a ToWireContext for handlers.
+   */
+  #createToWireContext(
+    path: string,
+    transfers: Array<Transferable>,
+  ): ToWireContext {
+    return {
+      toWire: (value: unknown, key?: string | number): WireValue => {
+        const subpath = key !== undefined ? String(key) : '';
+        const fullPath =
+          path && subpath ? `${path}.${subpath}` : path || subpath;
+        return this.#toWire(value, fullPath, transfers);
+      },
+    };
+  }
+
+  /**
+   * Create a WireProxy for a value.
+   */
+  #makeProxyWire(value: object) {
+    const existingId = this.#getRemoteId(value);
+    if (existingId !== undefined) {
+      return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
+    }
     const proxyId = this.#registerLocal(value);
     return {[WIRE_TYPE]: 'proxy', proxyId};
+  }
+
+  /**
+   * Create a WirePromise for a promise.
+   */
+  #makePromiseWire(value: Promise<unknown>) {
+    const promiseId = this.#registerPromise(value);
+    return {[WIRE_TYPE]: 'promise', promiseId};
   }
 
   /**
@@ -282,16 +347,20 @@ export class Connection {
    * In nested mode: auto-proxy functions and promises, honor LocalProxy markers.
    * In debug mode: throw helpful errors for non-cloneable values.
    */
-  #processForClone(value: unknown, path: string): unknown {
+  #processForClone(
+    value: unknown,
+    path: string,
+    transfers: Array<Transferable>,
+  ): unknown {
+    // Transfer markers: add to transfer list and return raw value
+    if (isTransferMarker(value)) {
+      transfers.push(value.value);
+      return value.value;
+    }
+
     // LocalProxy markers are explicitly proxied
     if (isLocalProxy(value)) {
-      const obj = value.value as object;
-      const existingId = this.#getRemoteId(obj);
-      if (existingId !== undefined) {
-        return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
-      }
-      const proxyId = this.#registerLocal(obj);
-      return {[WIRE_TYPE]: 'proxy', proxyId};
+      return this.#makeProxyWire(value.value as object);
     }
 
     // Functions are auto-proxied in nested mode
@@ -299,12 +368,7 @@ export class Connection {
       if (!this.#nestedProxies) {
         throw new NonCloneableError('function', path);
       }
-      const existingId = this.#getRemoteId(value as object);
-      if (existingId !== undefined) {
-        return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
-      }
-      const proxyId = this.#registerLocal(value as object);
-      return {[WIRE_TYPE]: 'proxy', proxyId};
+      return this.#makeProxyWire(value as object);
     }
 
     if (value === null || typeof value !== 'object') {
@@ -321,13 +385,22 @@ export class Connection {
       if (!this.#nestedProxies) {
         throw new NonCloneableError('promise', path);
       }
-      const promiseId = this.#registerPromise(value);
-      return {[WIRE_TYPE]: 'promise', promiseId};
+      return this.#makePromiseWire(value);
+    }
+
+    // Check handlers (if any)
+    if (this.#handlers.length > 0) {
+      for (const handler of this.#handlers) {
+        if (handler.canHandle(value)) {
+          const ctx = this.#createToWireContext(path, transfers);
+          return handler.toWire(value, ctx);
+        }
+      }
     }
 
     if (Array.isArray(value)) {
       return value.map((item, index) =>
-        this.#processForClone(item, `${path}[${String(index)}]`),
+        this.#processForClone(item, `${path}[${String(index)}]`, transfers),
       );
     }
 
@@ -337,6 +410,7 @@ export class Connection {
         processed[key] = this.#processForClone(
           (value as Record<string, unknown>)[key],
           `${path}.${key}`,
+          transfers,
         );
       }
       return processed;
@@ -353,9 +427,18 @@ export class Connection {
   // ============================================================
 
   /**
+   * Create a FromWireContext for handlers.
+   */
+  #createFromWireContext(): FromWireContext {
+    return {
+      fromWire: (wire: WireValue): unknown => this.#fromWire(wire),
+    };
+  }
+
+  /**
    * Deserialize a value from wire format.
    */
-  fromWireValue(wire: WireValue): unknown {
+  #fromWire(wire: WireValue): unknown {
     if (isWireProxy(wire)) {
       const existing =
         this.#getLocal(wire.proxyId) ?? this.#getRemote(wire.proxyId);
@@ -369,21 +452,33 @@ export class Connection {
       return this.#createRemotePromise(wire.promiseId);
     }
 
-    // Check remaining wire types (only used here, so inlined)
+    // Check remaining wire types
     if (typeof wire === 'object' && wire !== null) {
       const w = wire as Record<string, unknown>;
-      if (w[WIRE_TYPE] === 'proxy-property') {
+      const wireType = w[WIRE_TYPE];
+
+      if (wireType === 'proxy-property') {
         const pp = wire as WireProxyProperty;
         return this.#resolveProxyProperty(pp.targetProxyId, pp.property);
       }
-      if (w[WIRE_TYPE] === 'thrown') {
+      if (wireType === 'thrown') {
         throw deserializeError((wire as WireThrown).error);
+      }
+
+      // Check handler wireTypes
+      if (typeof wireType === 'string') {
+        const handler = this.#handlersByWireType.get(wireType);
+        if (handler?.fromWire) {
+          const ctx = this.#createFromWireContext();
+          return handler.fromWire(wire, ctx);
+        }
+        // Handler exists but no fromWire — value is already correct type
+        // (e.g., transferred stream arrives as stream)
       }
     }
 
-    // Raw value - may contain nested markers only if nestedProxies is enabled
-    // In shallow mode, we never send nested wire markers, so skip traversal
-    if (!this.#nestedProxies) {
+    // Raw value - may contain nested markers if nestedProxies or handlers enabled
+    if (!this.#nestedProxies && this.#handlers.length === 0) {
       return wire;
     }
     return this.#processFromClone(wire);
@@ -410,8 +505,26 @@ export class Connection {
       return this.#createRemotePromise(value.promiseId);
     }
 
+    // Check handler wireTypes
+    const w = value as Record<string, unknown>;
+    const wireType = w[WIRE_TYPE];
+    if (typeof wireType === 'string') {
+      const handler = this.#handlersByWireType.get(wireType);
+      if (handler?.fromWire) {
+        const ctx = this.#createFromWireContext();
+        return handler.fromWire(value, ctx);
+      }
+    }
+
     if (Array.isArray(value)) {
       return value.map((item) => this.#processFromClone(item));
+    }
+
+    // Only traverse plain objects ({...}) for nested wire markers.
+    // Class instances and transferred objects (streams, etc.) have
+    // non-Object prototypes, so isPlainObject returns false.
+    if (!isPlainObject(value)) {
+      return value;
     }
 
     const processed: Record<string, unknown> = {};
@@ -434,12 +547,16 @@ export class Connection {
     const promiseId = this.#nextPromiseId++;
     promise.then(
       (value) => {
-        const wireValue = this.toWireValue(value);
-        this.#endpoint.postMessage({
-          type: 'promise-resolve',
-          promiseId,
-          value: wireValue,
-        });
+        const transfers: Array<Transferable> = [];
+        const wire = this.#toWire(value, '', transfers);
+        this.#endpoint.postMessage(
+          {
+            type: 'promise-resolve',
+            promiseId,
+            value: wire,
+          },
+          transfers,
+        );
       },
       (error: unknown) => {
         this.#endpoint.postMessage({
@@ -549,18 +666,22 @@ export class Connection {
     method: string | undefined,
     args: Array<unknown>,
   ): Promise<unknown> {
-    const wireArgs = args.map((arg) => this.toWireValue(arg));
+    const transfers: Array<Transferable> = [];
+    const wireArgs = args.map((arg) => this.#toWire(arg, '', transfers));
     const {promise, resolve, reject} = Promise.withResolvers<unknown>();
     const id = this.#nextCallId++;
     this.#pendingCalls.set(id, {resolve, reject});
-    this.#endpoint.postMessage({
-      type: 'call',
-      id,
-      target,
-      action: 'call',
-      method,
-      args: wireArgs,
-    });
+    this.#endpoint.postMessage(
+      {
+        type: 'call',
+        id,
+        target,
+        action: 'call',
+        method,
+        args: wireArgs,
+      },
+      transfers,
+    );
     return promise;
   }
 
@@ -601,7 +722,7 @@ export class Connection {
         if (pending) {
           this.#pendingRemotePromises.delete(message.promiseId);
           try {
-            pending.resolve(this.fromWireValue(message.value));
+            pending.resolve(this.#fromWire(message.value));
           } catch (error) {
             pending.reject(
               error instanceof Error ? error : new Error(String(error)),
@@ -623,7 +744,7 @@ export class Connection {
         if (call) {
           this.#pendingCalls.delete(message.id);
           try {
-            call.resolve(this.fromWireValue(message.value));
+            call.resolve(this.#fromWire(message.value));
           } catch (error) {
             call.reject(
               error instanceof Error ? error : new Error(String(error)),
@@ -653,7 +774,7 @@ export class Connection {
     const {id, target, method, args, action} = message;
 
     // Deserialize arguments
-    const deserializedArgs = args.map((arg) => this.fromWireValue(arg));
+    const deserializedArgs = args.map((arg) => this.#fromWire(arg));
 
     // Look up the target object
     const proxyTarget = this.#getLocal(target);
@@ -698,11 +819,16 @@ export class Connection {
         );
       }
 
-      this.#endpoint.postMessage({
-        type: 'return',
-        id,
-        value: this.toWireValue(result),
-      });
+      const transfers: Array<Transferable> = [];
+      const wire = this.#toWire(result, '', transfers);
+      this.#endpoint.postMessage(
+        {
+          type: 'return',
+          id,
+          value: wire,
+        },
+        transfers,
+      );
     } catch (error) {
       this.#endpoint.postMessage({
         type: 'throw',

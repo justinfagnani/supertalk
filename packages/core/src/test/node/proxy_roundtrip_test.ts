@@ -89,10 +89,11 @@ void suite('Proxy round-trip', () => {
 
       using ctx = setupService(
         {
-          createHandler(): Handler {
-            return new Handler();
+          createHandler(): LocalProxy<Handler> {
+            return proxy(new Handler());
           },
-          receiveHandler(handler: Handler): void {
+          // When a RemoteProxy<Handler> is sent back, it's unwrapped to Handler
+          receiveHandler(handler: Handler | object): void {
             receivedObjects.push(handler);
           },
         },
@@ -195,22 +196,22 @@ void suite('Proxy round-trip', () => {
         }
       }
 
-      let capturedCallback: (() => Result) | undefined;
+      let capturedCallback: (() => LocalProxy<Result>) | undefined;
 
       using ctx = setupService(
         {
-          setCallback(cb: () => Result): void {
+          setCallback(cb: () => LocalProxy<Result>): void {
             capturedCallback = cb;
           },
-          invokeCallback(): Result | undefined {
+          invokeCallback(): LocalProxy<Result> | undefined {
             return capturedCallback?.();
           },
         },
         {nestedProxies: true},
       );
 
-      // Set a callback that returns a class instance
-      await ctx.remote.setCallback(() => new Result(21));
+      // Set a callback that returns a class instance wrapped in proxy()
+      await ctx.remote.setCallback(() => proxy(new Result(21)));
 
       // Invoke and use the result - Remoted makes double() return Promise
       const result = await ctx.remote.invokeCallback();

@@ -1,4 +1,5 @@
 /lib
+/handlers
 /test
 /bench
 /index.*

@@ -66,6 +66,14 @@ const service = {
   and promises anywhere in the graph are auto-proxied. Class instances still
   require explicit `proxy()` markers for type safety.
 
+In both modes, **plain objects** (`{...}`) are traversed for nested proxy
+markers, functions, and promises, while **class instances** and **objects with
+custom prototypes** are passed directly to structured clone. This means a plain
+object with a nested callback works in nested mode, but a class instance with a
+callback field would fail. Use `proxy()` if you need a class instance's methods
+available remotely, or a handler to convert the instance into something
+cloneable.
+
 ### Per-Connection Configuration
 
 All configuration is scoped to individual connections via `expose()` and
@@ -90,9 +98,115 @@ const remote = wrap<Service>(endpoint, {debug: true});
 
 ### Future Goals
 
-- **Streams**: Support `ReadableStream`/`WritableStream` across the boundary
 - **Signals**: Reactive state synchronization via TC39 Signals
-- **Pluggable handlers**: Custom serialization for Maps, Sets, etc.
+
+## Transferables with `transfer()`
+
+Some objects like `ArrayBuffer`, `MessagePort`, `ReadableStream`, and
+`WritableStream` can be **transferred** rather than cloned. Transferring moves
+the object to the other side (the original becomes unusable), but is much
+faster for large data.
+
+Use `transfer()` to mark values for transfer:
+
+```ts
+import {transfer} from '@supertalk/core';
+
+const service = {
+  // Transfer the buffer (fast, original neutered)
+  getBuffer(): ArrayBuffer {
+    const buf = new ArrayBuffer(1024 * 1024);
+    fillBuffer(buf);
+    return transfer(buf);
+  },
+
+  // Without transfer(), ArrayBuffer is cloned (slower, original stays valid)
+  getBufferCopy(): ArrayBuffer {
+    return new ArrayBuffer(1024);
+  },
+};
+```
+
+## Handlers
+
+Handlers provide pluggable serialization for custom types. Use them for:
+
+- **Collections**: Maps, Sets that should clone or proxy
+- **Streams**: ReadableStream/WritableStream transferred across the boundary
+- **Custom types**: Domain-specific serialization
+
+### Stream Handler
+
+Supertalk provides a separate handler for transferring streams:
+
+```ts
+import {wrap, expose} from '@supertalk/core';
+import {streamHandler} from '@supertalk/core/handlers/streams.js';
+
+// Both sides must use the same handlers
+expose(service, self, {handlers: [streamHandler]});
+const remote = wrap<typeof service>(worker, {handlers: [streamHandler]});
+
+// Now streams transfer automatically
+const stream = await remote.getDataStream();
+for await (const chunk of stream) {
+  console.log(chunk);
+}
+```
+
+### Custom Handlers
+
+Create handlers for any type:
+
+```ts
+import {
+  WIRE_TYPE,
+  type Handler,
+  type ToWireContext,
+  type FromWireContext,
+} from '@supertalk/core';
+
+// A handler that clones Maps by converting to/from arrays
+const mapHandler: Handler<Map<unknown, unknown>> = {
+  wireType: 'my-app:map',
+
+  canHandle(value): value is Map<unknown, unknown> {
+    return value instanceof Map;
+  },
+
+  toWire(map, ctx: ToWireContext) {
+    // ctx.toWire() recursively handles nested values
+    const entries = [...map.entries()].map(([k, v]) => [
+      ctx.toWire(k),
+      ctx.toWire(v),
+    ]);
+    return {
+      [WIRE_TYPE]: 'my-app:map',
+      entries,
+    };
+  },
+
+  fromWire(wire, ctx: FromWireContext) {
+    return new Map(
+      wire.entries.map(([k, v]) => [ctx.fromWire(k), ctx.fromWire(v)]),
+    );
+  },
+};
+
+// Use on both sides
+expose(service, self, {handlers: [mapHandler]});
+const remote = wrap<typeof service>(worker, {handlers: [mapHandler]});
+```
+
+### Handler Context Methods
+
+The `ToWireContext` passed to `toWire()` provides:
+
+- `ctx.toWire(value)` — Recursively process nested values
+
+The `FromWireContext` passed to `fromWire()` provides:
+
+- `ctx.fromWire(wire)` — Recursively process nested wire values
 
 ## Quick Start
 
@@ -195,20 +309,27 @@ await widget.activate(); // Promise<void>
 When values cross the communication boundary, Supertalk decides whether to
 **clone** (copy the value) or **proxy** (create a remote reference).
 
-| Value Type                         | Shallow Mode     | Nested Mode      |
-| ---------------------------------- | ---------------- | ---------------- |
-| Primitives                         | ✅ Cloned        | ✅ Cloned        |
-| Plain objects                      | ✅ Cloned        | ✅ Cloned        |
-| Arrays                             | ✅ Cloned        | ✅ Cloned        |
-| Functions (top-level)              | 🛜 Proxied       | 🛜 Proxied       |
-| Functions (nested)                 | ❌ Error         | 🛜 Proxied       |
-| Promises (top-level)               | 🛜 Proxied       | 🛜 Proxied       |
-| Promises (nested)                  | ❌ Error         | 🛜 Proxied       |
-| Class instances (top-level)        | 🛜 Proxied       | 🛜 Proxied       |
-| Class instances (nested)           | ⚠️ Shallow Clone | ⚠️ Shallow Clone |
-| `proxy()` wrapped values           | 🛜 Proxied       | 🛜 Proxied       |
-| `proxy()` wrapped values (nested)  | ❌ Error         | 🛜 Proxied       |
-| Other structured cloneable objects | ✅ Cloned        | ✅ Cloned        |
+| Value Type                                       | Shallow Mode | Nested Mode |
+| ------------------------------------------------ | ------------ | ----------- |
+| Primitives                                       | ✅ Cloned    | ✅ Cloned   |
+| Plain objects `{...}`                            | ✅ Cloned    | ✅ Cloned   |
+| Arrays                                           | ✅ Cloned    | ✅ Cloned   |
+| Functions (top-level)                            | 🛜 Proxied   | 🛜 Proxied  |
+| Functions (nested)                               | ❌ Error     | 🛜 Proxied  |
+| Promises (top-level return)                      | 🛜 Proxied   | 🛜 Proxied  |
+| Promises (nested)                                | ❌ Error     | 🛜 Proxied  |
+| `proxy()` wrapped values                         | 🛜 Proxied   | 🛜 Proxied  |
+| `proxy()` wrapped values (nested)                | ❌ Error     | 🛜 Proxied  |
+| Class instances & objects with custom prototypes | ⚠️ Cloned\*  | ⚠️ Cloned\* |
+| Other structured cloneable objects               | ✅ Cloned    | ✅ Cloned   |
+
+\* After handling special values like functions, arrays, plain objects, and
+proxies, values are passed to [the structured clone
+algorithm](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm).
+Certain native objects, like Dates and RegExps, are cloned and automatically
+re-created on the receiving end. Everything else is copied, but loses private
+fields, prototype, etc. For other classes, mutable objects, and objects with
+custom prototypes, use `proxy()` to preserve methods and behavior.
 
 ### Callbacks
 
@@ -346,6 +467,8 @@ This prevents memory leaks while ensuring objects stay alive as long as needed.
 ## Options
 
 ```ts
+import type {Handler} from '@supertalk/core';
+
 interface Options {
   /**
    * Enable nested proxy handling.
@@ -360,6 +483,12 @@ interface Options {
    * Traverses data to find non-cloneable values and report their paths.
    */
   debug?: boolean;
+
+  /**
+   * Custom handlers for serializing/deserializing specific types.
+   * Handlers are checked in order; first match wins.
+   */
+  handlers?: Array<Handler>;
 }
 ```
 
