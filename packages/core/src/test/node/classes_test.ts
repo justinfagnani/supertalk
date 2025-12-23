@@ -136,6 +136,27 @@ void suite('class instance proxying', () => {
       // Getter access is correctly typed as Promise<number>
       assert.strictEqual(await counter.count, 42);
     });
+
+    void test('class instance property setting', async () => {
+      await using ctx = await setupService({
+        createCounter(name: string): LocalProxy<Counter> {
+          return proxy(new Counter(name));
+        },
+      });
+
+      const counter = (await ctx.remote.createCounter(
+        'original',
+      )) as unknown as RemoteProxy<Counter>;
+
+      // Verify initial value
+      assert.strictEqual(await counter.name, 'original');
+
+      // Set property remotely
+      counter.name = 'updated' as unknown as Promise<string>;
+
+      // Verify the change persisted
+      assert.strictEqual(await counter.name, 'updated');
+    });
   });
 
   void suite('chained method calls', () => {

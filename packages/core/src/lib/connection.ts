@@ -621,6 +621,16 @@ export class Connection {
         }
         return this.#createProxyProperty(proxyId, prop);
       },
+
+      set: (_target, prop, value) => {
+        if (typeof prop !== 'string') {
+          return false;
+        }
+        // Fire-and-forget: initiate the set but don't block
+        // The returned promise can be awaited if needed
+        void this.#makeSet(proxyId, prop, value);
+        return true;
+      },
     });
 
     this.#setRemote(proxyId, proxy);
@@ -713,6 +723,36 @@ export class Connection {
       method: property,
       args: [],
     });
+    return promise;
+  }
+
+  /**
+   * Make a property SET request to the remote side.
+   */
+  #makeSet(
+    target: number,
+    property: string,
+    value: unknown,
+  ): Promise<undefined> {
+    const transfers: Array<Transferable> = [];
+    const wireValue = this.#toWire(value, '', transfers);
+    const {promise, resolve, reject} = Promise.withResolvers<undefined>();
+    const id = this.#nextCallId++;
+    this.#pendingCalls.set(id, {
+      resolve: resolve as (v: unknown) => void,
+      reject,
+    });
+    this.#endpoint.postMessage(
+      {
+        type: 'call',
+        id,
+        target,
+        action: 'set',
+        method: property,
+        args: [wireValue],
+      },
+      transfers,
+    );
     return promise;
   }
 
@@ -811,6 +851,12 @@ export class Connection {
           throw new TypeError('Property name required for get action');
         }
         result = (proxyTarget as Record<string, unknown>)[method];
+      } else if (action === 'set') {
+        if (method === undefined) {
+          throw new TypeError('Property name required for set action');
+        }
+        (proxyTarget as Record<string, unknown>)[method] = deserializedArgs[0];
+        result = undefined;
       } else if (method === undefined) {
         // Direct function invocation
         if (typeof proxyTarget !== 'function') {

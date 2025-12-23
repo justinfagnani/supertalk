@@ -204,14 +204,15 @@ export type Message =
  *
  * - 'call': Invoke a method or function with arguments
  * - 'get': Get a property value (method must be property name)
+ * - 'set': Set a property value (method must be property name, args[0] is value)
  */
-export type CallAction = 'call' | 'get';
+export type CallAction = 'call' | 'get' | 'set';
 
 /**
- * Call a method on a target object, invoke a function, or get a property.
+ * Call a method on a target object, invoke a function, get/set a property.
  *
  * - target: proxy ID of the target object
- * - action: 'call' to invoke, 'get' to get property
+ * - action: 'call' to invoke, 'get' to get property, 'set' to set property
  * - method: method/property name, or undefined for direct function invocation
  */
 export interface CallMessage {
