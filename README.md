@@ -60,6 +60,31 @@ const result = await remote.add(1, 2); // 3
 
 ## Core Concepts
 
+### Requests and Responses
+
+Most cross-worker communication follows a request/response pattern, but
+`postMessage()` only sends one-way messages. Matching responses to requests is
+left as an exercise to the developer. Supertalk builds a request/response
+protocol on top of `postMessage()`, so you can call methods and await results
+naturally.
+
+### Clones vs Proxies
+
+`postMessage()` copies payloads via the structured clone algorithm, which only
+supports a limited set of types. Functions are completely unsupported, and class
+instances lose their prototypes—so things like Promises don't survive the trip.
+
+Supertalk addresses this by _proxying_ values that can't be cloned. A proxied
+objectstays on its original side; the other side gets a lightweight proxy
+forwards calls back. This is how functions, promises, and class instances work
+across the message boundary.
+
+### Shallow vs Deep Proxying
+
+By default, Supertalk only proxies objects passed directly to or returned from
+method calls. This keeps messages fast. If you need proxies nested anywhere in a
+payload, set `nestedProxies: true` to traverse the full object graph.
+
 ### Functions & Promises Just Work
 
 Functions and promises passed as arguments or return values are automatically
@@ -68,16 +93,17 @@ proxied:
 ```ts
 // Exposed side
 const service = {
-  forEach(items: number[], callback: (item: number) => void) {
-    for (const item of items) {
-      callback(item); // Calls back to wrapped side
+  async processData(data: Data, onProgress: (percent: number) => void) {
+    for (let i = 0; i < data.items.length; i++) {
+      await process(data.items[i]);
+      onProgress(((i + 1) / data.items.length) * 100);
     }
   },
 };
 
 // Wrapped side
-await remote.forEach([1, 2, 3], (item) => {
-  console.log(item); // Runs locally
+await remote.processData(data, (percent) => {
+  console.log(`${percent}% complete`); // Runs locally
 });
 ```
 
@@ -99,6 +125,10 @@ expose(
 );
 ```
 
+The `proxy()` helper also tells TypeScript to use a `RemoteProxy<T>` on the
+receiving side, so that the type-checker knows that methods are transformed to
+be async.
+
 ### Transferables with `transfer()`
 
 Zero-copy transfer for `ArrayBuffer`, `MessagePort`, streams, and more:
@@ -116,10 +146,10 @@ const service = {
 
 ## Packages
 
-| Package                                       | Description                    |
-| --------------------------------------------- | ------------------------------ |
-| [@supertalk/core](./packages/core/)           | Core RPC and proxy library     |
-| [@supertalk/signals](./packages/signals/)     | TC39 Signals integration       |
+| Package                                   | Description                |
+| ----------------------------------------- | -------------------------- |
+| [@supertalk/core](./packages/core/)       | Core RPC and proxy library |
+| [@supertalk/signals](./packages/signals/) | TC39 Signals integration   |
 
 ## Why Supertalk?
 
