@@ -669,6 +669,27 @@ const result = await api.doSomething();
 
 ## Future Considerations
 
+### Handler Subscriptions
+
+The `Handler` interface currently only supports `toWire()` and `fromWire()` for
+value transformation during RPC calls. However, some use cases need **spontaneous
+push updates** — for example, signals must notify receivers when their values change
+*outside* of any RPC call.
+
+Currently, `@supertalk/signals`'s `SignalManager` works around this by installing
+its own message listener for `signal:batch` updates. This is similar to how core
+handles promise settlement with `promise-resolve`/`promise-reject` messages, except
+signals can update many times (not just once).
+
+A generalized "subscription" mechanism would let handlers:
+- Register ongoing update channels during `toWire()`
+- Send updates through core's message infrastructure
+- Clean up subscriptions on release
+
+This would unify the promise pattern with signals and other streaming use cases.
+
+### Other Future Work
+
 - WebSocket transport
 - Node.js worker threads
 - SharedArrayBuffer integration

@@ -53,9 +53,6 @@ export class SignalManager {
   // Receiver side: RemoteSignals we've created, indexed by ID
   #remoteSignals = new Map<number, RemoteSignal<unknown>>();
 
-  // Message handler reference for cleanup
-  #messageHandler: (event: MessageEvent) => void;
-
   /**
    * The handler to use with expose() and wrap().
    *
@@ -70,8 +67,14 @@ export class SignalManager {
     this.#endpoint = endpoint;
 
     // Set up message listener for batch updates
-    this.#messageHandler = this.#onMessage.bind(this);
-    endpoint.addEventListener('message', this.#messageHandler);
+    //
+    // The Supertalk Handler interface only provides toWire/fromWire for value
+    // transformation during RPC calls. But signals need spontaneous push
+    // updates when values change outside of any RPC call. This is similar to
+    // how core handles promise-resolve/promise-reject, except signals update
+    // many times. Until core has a generalized subscription mechanism, we
+    // maintain our own message protocol for signal:batch updates.
+    endpoint.addEventListener('message', this.#onMessage);
 
     // Create the handler
     // We use `as Handler<AnySignal, WireSignal>` because the handler is
@@ -100,7 +103,7 @@ export class SignalManager {
    * Clean up resources.
    */
   dispose(): void {
-    this.#endpoint.removeEventListener('message', this.#messageHandler);
+    this.#endpoint.removeEventListener('message', this.#onMessage);
     if (this.#watcher !== undefined) {
       this.#watcher.unwatch(...this.#signalWrappers.values());
     }
@@ -220,7 +223,7 @@ export class SignalManager {
   /**
    * Handle incoming messages.
    */
-  #onMessage(event: MessageEvent): void {
+  #onMessage = (event: MessageEvent): void =>{
     const data = event.data as unknown;
     if (isSignalBatchUpdate(data)) {
       this.#handleBatchUpdate(data);

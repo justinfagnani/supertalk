@@ -32,7 +32,7 @@ void suite('@supertalk/signals', () => {
     void test('Signal.State is transferred with initial value', async () => {
       const count = new Signal.State(42);
 
-      await using ctx = await setupSignalService({
+      using ctx = await setupSignalService({
         get count() {
           return count;
         },
@@ -50,7 +50,7 @@ void suite('@supertalk/signals', () => {
     void test('Signal.State initial value is available synchronously', async () => {
       const name = new Signal.State('Alice');
 
-      await using ctx = await setupSignalService({
+      using ctx = await setupSignalService({
         get name() {
           return name;
         },
@@ -67,7 +67,7 @@ void suite('@supertalk/signals', () => {
       const count = new Signal.State(5);
       const doubled = new Signal.Computed(() => count.get() * 2);
 
-      await using ctx = await setupSignalService({
+      using ctx = await setupSignalService({
         get doubled() {
           return doubled;
         },
@@ -83,7 +83,7 @@ void suite('@supertalk/signals', () => {
       const a = new Signal.State(1);
       const b = new Signal.State(2);
 
-      await using ctx = await setupSignalService({
+      using ctx = await setupSignalService({
         get a() {
           return a;
         },
@@ -138,7 +138,7 @@ void suite('@supertalk/signals', () => {
     void test('updates propagate to receiver', async () => {
       const count = new Signal.State(0);
 
-      await using ctx = await setupSignalService({
+      using ctx = await setupSignalService({
         get count() {
           return count;
         },
@@ -163,7 +163,7 @@ void suite('@supertalk/signals', () => {
       const a = new Signal.State(0);
       const b = new Signal.State(0);
 
-      await using ctx = await setupSignalService({
+      using ctx = await setupSignalService({
         get a() {
           return a;
         },
@@ -198,7 +198,7 @@ void suite('@supertalk/signals', () => {
       const count = new Signal.State(5);
       const doubled = new Signal.Computed(() => count.get() * 2);
 
-      await using ctx = await setupSignalService({
+      using ctx = await setupSignalService({
         get count() {
           return count;
         },
@@ -233,7 +233,7 @@ void suite('@supertalk/signals', () => {
     void test('RemoteSignal works with Signal.Computed', async () => {
       const count = new Signal.State(5);
 
-      await using ctx = await setupSignalService({
+      using ctx = await setupSignalService({
         get count() {
           return count;
         },
