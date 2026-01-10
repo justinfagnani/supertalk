@@ -13,6 +13,8 @@ workers with automatic batched updates.
 - **Lazy watching:** Source signals are only watched when the receiver observes
   reactively, respecting `[Signal.subtle.watched]` callbacks
 - **Works with `Signal.State` and `Signal.Computed`**
+- **Modern JavaScript:** Published as ES2024, targeting current browsers and
+  Node.js 20+
 
 ## Installation
 

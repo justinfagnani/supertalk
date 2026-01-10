@@ -16,6 +16,8 @@ Supertalk is built to be a joy to use and deploy:
 - **Composable & extendable:** Non-global configuration, nested objects,
   services are just classes, composable transport handlers
 - **Standard modules:** ESM-only, no CommonJS
+- **Modern JavaScript:** Published as ES2024, targeting current browsers and
+  Node.js 20+
 
 ## Installation
 
