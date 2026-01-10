@@ -2,7 +2,11 @@ import {suite, test} from 'node:test';
 import * as assert from 'node:assert';
 import {Signal} from 'signal-polyfill';
 import {RemoteSignal} from '../../index.js';
-import {setupSignalService, waitMicrotasks} from './test-utils.js';
+import {
+  setupSignalService,
+  waitMicrotasks,
+  waitForMessages,
+} from './test-utils.js';
 
 void suite('@supertalk/signals', () => {
   void suite('RemoteSignal', () => {
@@ -258,6 +262,229 @@ void suite('@supertalk/signals', () => {
 
       // Local computed should update
       assert.strictEqual(doubled.get(), 20);
+    });
+  });
+
+  void suite('Signal reuse', () => {
+    void test('accessing same signal twice returns same RemoteSignal instance', async () => {
+      const count = new Signal.State(42);
+
+      using ctx = await setupSignalService({
+        get count() {
+          return count;
+        },
+      });
+
+      const first = await ctx.remote.count;
+      const second = await ctx.remote.count;
+
+      // Should be the exact same object
+      assert.strictEqual(first, second);
+    });
+
+    void test('sender tracks each signal only once', async () => {
+      const count = new Signal.State(0);
+
+      using ctx = await setupSignalService({
+        get count() {
+          return count;
+        },
+      });
+
+      // Access the signal multiple times
+      await ctx.remote.count;
+      await ctx.remote.count;
+      await ctx.remote.count;
+
+      // Sender should only be tracking one signal
+      assert.strictEqual(ctx.senderManager._sentSignalCount, 1);
+    });
+  });
+
+  void suite('Signal cleanup', () => {
+    void test('releaseSignal removes signal from sender tracking', async () => {
+      const count = new Signal.State(0);
+
+      using ctx = await setupSignalService({
+        get count() {
+          return count;
+        },
+      });
+
+      await ctx.remote.count;
+
+      // Sender should be tracking the signal
+      assert.strictEqual(ctx.senderManager._sentSignalCount, 1);
+      assert.strictEqual(ctx.senderManager._isWatching(1), true);
+
+      // Manually trigger release (simulating what happens when RemoteSignal is GC'd)
+      ctx.senderManager.releaseSignal(1);
+
+      // Sender should no longer be tracking the signal
+      assert.strictEqual(ctx.senderManager._sentSignalCount, 0);
+      assert.strictEqual(ctx.senderManager._isWatching(1), false);
+    });
+
+    void test('signal:release message triggers cleanup on sender', async () => {
+      const count = new Signal.State(0);
+
+      using ctx = await setupSignalService({
+        get count() {
+          return count;
+        },
+      });
+
+      await ctx.remote.count;
+
+      // Sender should be tracking the signal
+      assert.strictEqual(ctx.senderManager._sentSignalCount, 1);
+
+      // Simulate the receiver sending a release message (normally triggered by GC)
+      ctx.port2.postMessage({type: 'signal:release', signalId: 1});
+
+      // Wait for message to be processed
+      await waitForMessages();
+
+      // Sender should no longer be tracking the signal
+      assert.strictEqual(ctx.senderManager._sentSignalCount, 0);
+    });
+
+    void test('updates stop after signal is released', async () => {
+      const count = new Signal.State(0);
+
+      using ctx = await setupSignalService({
+        get count() {
+          return count;
+        },
+      });
+
+      const remoteCount = (await ctx.remote
+        .count) as unknown as RemoteSignal<number>;
+      assert.strictEqual(remoteCount.get(), 0);
+
+      // Update works before release
+      count.set(1);
+      await waitForMessages();
+      assert.strictEqual(remoteCount.get(), 1);
+
+      // Release the signal
+      ctx.senderManager.releaseSignal(1);
+
+      // Update after release - value should not change on remote
+      count.set(999);
+      await waitForMessages();
+
+      // Remote still has old value (no more updates being sent)
+      assert.strictEqual(remoteCount.get(), 1);
+    });
+
+    void test('receiver tracks remote signals via WeakRef', async () => {
+      const count = new Signal.State(0);
+
+      using ctx = await setupSignalService({
+        get count() {
+          return count;
+        },
+      });
+
+      await ctx.remote.count;
+
+      // Receiver should be tracking the remote signal
+      assert.strictEqual(ctx.receiverManager._remoteSignalCount, 1);
+    });
+  });
+
+  void suite('Nested proxies mode', () => {
+    void test('signal value with nested function is proxied', async () => {
+      const data = new Signal.State({
+        value: 42,
+        increment: () => 1,
+      });
+
+      using ctx = await setupSignalService(
+        {
+          get data() {
+            return data;
+          },
+        },
+        {nestedProxies: true},
+      );
+
+      const remoteData = (await ctx.remote.data) as unknown as RemoteSignal<{
+        value: number;
+        increment: () => number;
+      }>;
+
+      // Should have the cloned value
+      assert.strictEqual(remoteData.get().value, 42);
+
+      // The nested function should be proxied and callable
+      const result = await remoteData.get().increment();
+      assert.strictEqual(result, 1);
+    });
+
+    void test('signal update with cloneable nested values works', async () => {
+      // Note: Signal updates with nestedProxies currently go through postMessage
+      // directly, which means they follow structured clone semantics. Functions
+      // and class instances in updates will fail with DataCloneError.
+      // Only the *initial* value goes through the handler's toWire/fromWire.
+      // This test verifies that updates with cloneable values still work.
+      const data = new Signal.State({
+        value: 0,
+        nested: {count: 0},
+      });
+
+      using ctx = await setupSignalService(
+        {
+          get data() {
+            return data;
+          },
+          updateData(n: number) {
+            data.set({
+              value: n,
+              nested: {count: n * 2},
+            });
+          },
+        },
+        {nestedProxies: true},
+      );
+
+      const remoteData = (await ctx.remote.data) as unknown as RemoteSignal<{
+        value: number;
+        nested: {count: number};
+      }>;
+
+      assert.strictEqual(remoteData.get().value, 0);
+      assert.strictEqual(remoteData.get().nested.count, 0);
+
+      // Update the signal with cloneable values
+      await ctx.remote.updateData(5);
+      await waitForMessages();
+
+      // Value should be updated
+      assert.strictEqual(remoteData.get().value, 5);
+      assert.strictEqual(remoteData.get().nested.count, 10);
+    });
+
+    void test('signal value with nested array of functions', async () => {
+      const handlers = new Signal.State([() => 'first', () => 'second']);
+
+      using ctx = await setupSignalService(
+        {
+          get handlers() {
+            return handlers;
+          },
+        },
+        {nestedProxies: true},
+      );
+
+      const remoteHandlers = (await ctx.remote
+        .handlers) as unknown as RemoteSignal<Array<() => string>>;
+
+      const arr = remoteHandlers.get();
+      assert.strictEqual(arr.length, 2);
+      assert.strictEqual(await arr[0]!(), 'first');
+      assert.strictEqual(await arr[1]!(), 'second');
     });
   });
 });

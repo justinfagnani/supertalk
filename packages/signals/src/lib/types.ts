@@ -65,3 +65,24 @@ export function isSignalBatchUpdate(
   const type = (message as Record<string, unknown>)['type'];
   return type === 'signal:batch';
 }
+
+/**
+ * Release message sent from receiver to sender when a RemoteSignal is GC'd.
+ */
+export interface SignalReleaseMessage {
+  readonly type: 'signal:release';
+  readonly signalId: number;
+}
+
+/**
+ * Check if a message is a SignalReleaseMessage.
+ */
+export function isSignalReleaseMessage(
+  message: unknown,
+): message is SignalReleaseMessage {
+  if (message === null || typeof message !== 'object' || !('type' in message)) {
+    return false;
+  }
+  const type = (message as Record<string, unknown>)['type'];
+  return type === 'signal:release';
+}

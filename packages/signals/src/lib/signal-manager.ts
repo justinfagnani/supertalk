@@ -25,10 +25,15 @@ import type {
   Handler,
   ToWireContext,
   FromWireContext,
+  WireValue,
 } from '@supertalk/core';
 import {RemoteSignal} from './remote-signal.js';
 import type {AnySignal, WireSignal, SignalBatchUpdate} from './types.js';
-import {isSignalBatchUpdate, SIGNAL_WIRE_TYPE} from './types.js';
+import {
+  isSignalBatchUpdate,
+  isSignalReleaseMessage,
+  SIGNAL_WIRE_TYPE,
+} from './types.js';
 
 /**
  * Manages signal synchronization across a connection.
@@ -51,7 +56,11 @@ export class SignalManager {
   #signalWrappers = new Map<number, Signal.Computed<unknown>>();
 
   // Receiver side: RemoteSignals we've created, indexed by ID
-  #remoteSignals = new Map<number, RemoteSignal<unknown>>();
+  #remoteSignals = new Map<number, WeakRef<RemoteSignal<unknown>>>();
+  #remoteCleanup = new FinalizationRegistry((signalId: number) => {
+    this.#remoteSignals.delete(signalId);
+    this.#endpoint.postMessage({type: 'signal:release', signalId});
+  });
 
   /**
    * The handler to use with expose() and wrap().
@@ -93,8 +102,8 @@ export class SignalManager {
         return this.#sendSignal(signal, ctx);
       },
 
-      fromWire: (wire: WireSignal, _ctx: FromWireContext): unknown => {
-        return this.#receiveSignal(wire);
+      fromWire: (wire: WireSignal, ctx: FromWireContext): unknown => {
+        return this.#receiveSignal(wire, ctx);
       },
     } as Handler<AnySignal, WireSignal>;
   }
@@ -152,14 +161,24 @@ export class SignalManager {
   /**
    * Handle receiving a signal (receiver side).
    */
-  #receiveSignal(wire: WireSignal): RemoteSignal<unknown> {
-    // Check if we already have this signal
-    let remote = this.#remoteSignals.get(wire.signalId);
-    if (remote === undefined) {
-      // Create new RemoteSignal with initial value
-      remote = new RemoteSignal(wire.signalId, wire.value);
-      this.#remoteSignals.set(wire.signalId, remote);
+  #receiveSignal(
+    wire: WireSignal,
+    ctx: FromWireContext,
+  ): RemoteSignal<unknown> {
+    // Check if we already have this signal (via WeakRef)
+    const existingRef = this.#remoteSignals.get(wire.signalId);
+    const existing = existingRef?.deref();
+    if (existing !== undefined) {
+      return existing;
     }
+
+    // Deserialize the initial value through the context to handle nested proxies
+    const initialValue = ctx.fromWire(wire.value as WireValue);
+
+    // Create new RemoteSignal with initial value
+    const remote = new RemoteSignal(wire.signalId, initialValue);
+    this.#remoteSignals.set(wire.signalId, new WeakRef(remote));
+    this.#remoteCleanup.register(remote, wire.signalId);
     return remote;
   }
 
@@ -223,19 +242,22 @@ export class SignalManager {
   /**
    * Handle incoming messages.
    */
-  #onMessage = (event: MessageEvent): void =>{
+  #onMessage = (event: MessageEvent): void => {
     const data = event.data as unknown;
     if (isSignalBatchUpdate(data)) {
       this.#handleBatchUpdate(data);
+    } else if (isSignalReleaseMessage(data)) {
+      this.releaseSignal(data.signalId);
     }
-  }
+  };
 
   /**
    * Handle a batch update from the sender.
    */
   #handleBatchUpdate(message: SignalBatchUpdate): void {
     for (const update of message.updates) {
-      const remote = this.#remoteSignals.get(update.signalId);
+      const ref = this.#remoteSignals.get(update.signalId);
+      const remote = ref?.deref();
       if (remote !== undefined) {
         remote._update(update.value);
       }
@@ -254,5 +276,29 @@ export class SignalManager {
     }
     this.#sentSignals.delete(signalId);
     // Note: WeakMap entry will be GC'd automatically
+  }
+
+  /**
+   * Get the number of sent signals being tracked (for testing).
+   * @internal
+   */
+  get _sentSignalCount(): number {
+    return this.#sentSignals.size;
+  }
+
+  /**
+   * Get the number of remote signals being tracked (for testing).
+   * @internal
+   */
+  get _remoteSignalCount(): number {
+    return this.#remoteSignals.size;
+  }
+
+  /**
+   * Check if a signal ID is being watched (for testing).
+   * @internal
+   */
+  _isWatching(signalId: number): boolean {
+    return this.#signalWrappers.has(signalId);
   }
 }

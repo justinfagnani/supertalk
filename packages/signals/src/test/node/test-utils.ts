@@ -101,3 +101,11 @@ export async function waitMicrotasks(n = 2): Promise<void> {
     await nextMicrotask();
   }
 }
+
+/**
+ * Wait for a short delay to allow cross-port messages to propagate.
+ * More reliable than microtasks for MessageChannel communication.
+ */
+export function waitForMessages(ms = 10): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
