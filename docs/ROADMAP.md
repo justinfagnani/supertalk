@@ -411,9 +411,83 @@ await proxy.increment(); // Effect runs when update arrives
 
 ### Future Enhancements
 
-- [ ] Memory management: WeakRef + FinalizationRegistry for automatic signal cleanup
-- [ ] Release protocol: Notify sender when receiver no longer needs a signal
+#### Completed
+
+- [x] Memory management: WeakRef + FinalizationRegistry for automatic signal cleanup
+- [x] Release protocol: Notify sender when receiver no longer needs a signal
+- [x] Lazy watching: `[Signal.subtle.watched]` on sender only fires when receiver observes reactively
+- [x] `autoWatch` option for eager watching mode
+
+#### Phase 6b: Fused Signal Updates (Planned)
+
+**Problem**: After calling a method that mutates signals, there's a race between
+the response and the `signal:batch` update message.
+
+```typescript
+await remote.increment(); // Server bumps count from 0 → 1
+console.log(count.get()); // Race! Might still be 0
+```
+
+**Solution**: Piggyback signal updates on the response message. If signals were
+modified during method execution, include their new values in the response.
+
+```typescript
+// Current protocol (two messages):
+// 1. response: { result: void }
+// 2. signal:batch: { updates: [[signalId, 1]] }
+
+// Fused protocol (one message):
+// 1. response: { result: void, signalUpdates: [[signalId, 1]] }
+```
+
+**Benefits**:
+
+- Causal consistency: `await remote.foo()` guarantees signals are updated
+- No `await nextTick()` hacks needed
+- Enables reliable collection sync
+
+**Implementation notes**:
+
+- Requires core protocol change (add `signalUpdates` to response)
+- Server collects signal changes during method execution
+- Client applies updates before resolving the promise
+- Should be opt-in or automatic when SignalHandler is registered
+
+#### Phase 6c: Collection Support (Planned)
+
+**Goal**: Sync `signal-utils` collections like `SignalArray` and `SignalMap`.
+
+```typescript
+// Sender has a SignalArray
+const items = new SignalArray([1, 2, 3]);
+
+// Receiver gets a synchronized SignalArray
+const remoteItems = await remote.items; // SignalArray<number>
+remoteItems.at(0); // 1 - reactive reads!
+```
+
+**Implementation approaches**:
+
+| Approach                                     | Pros                | Cons                        |
+| -------------------------------------------- | ------------------- | --------------------------- |
+| **Full sync** — Send entire array on change  | Simple              | O(n) per mutation           |
+| **Operation sync** — Send ops (push, splice) | Efficient           | Need to intercept mutations |
+| **Diff sync** — Compute & send diffs         | Works with any code | Diff overhead               |
+
+**Recommended**: Start with full sync for simplicity, optimize later.
+
+**Dependencies**:
+
+- Fused signal updates (for reliable mutation→sync)
+- May require collaboration with `signal-utils` or custom wrappers
+
+**Package**: Likely `@supertalk/signal-utils` as separate add-on
+
+#### Other Future Items
+
 - [ ] `@clone()` decorator for synchronous property access (see Phase 7)
+- [ ] Error handling in update deserialization
+- [ ] Reconnection handling (re-subscribe to watched signals)
 
 ---
 

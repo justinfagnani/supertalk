@@ -498,15 +498,46 @@ interface ReleaseMessage {
 
 ### Phase 3: Memory Management
 
-- [ ] Reuse proxy release message for cleanup
-- [ ] Unwatch on release
-- [ ] Tests for cleanup
+- [x] Reuse proxy release message for cleanup
+- [x] Unwatch on release
+- [x] Tests for cleanup
 
 ### Future
 
+#### Fused Signal Updates (Planned)
+
+Piggyback signal updates on response messages for causal consistency:
+
+```typescript
+// Problem: race condition
+await remote.increment(); // Returns before signal:batch arrives
+console.log(count.get()); // Might still be 0!
+
+// Solution: include updates in response
+// Response: { result: void, signalUpdates: [[signalId, 1]] }
+await remote.increment();
+console.log(count.get()); // Guaranteed to be 1
+```
+
+#### Collection Support (Planned)
+
+Sync `signal-utils` collections like `SignalArray`:
+
+```typescript
+const items = new SignalArray([1, 2, 3]);
+// Receiver gets synchronized copy
+const remoteItems = await remote.items;
+remoteItems.at(0); // Reactive!
+```
+
+Options: full sync (simple), operation sync (efficient), or diff sync.
+Likely in separate `@supertalk/signal-utils` package.
+
+#### Other Future Items
+
 - [ ] Opt-in writable signals (last-write-wins, sender stops writing)
-- [ ] Signal collection support
-- [ ] Signal-backed class field detection
+- [ ] Error handling in update deserialization
+- [ ] Reconnection handling (re-subscribe to watched signals)
 
 ---
 
