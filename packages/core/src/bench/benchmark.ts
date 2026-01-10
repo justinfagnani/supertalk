@@ -222,7 +222,7 @@ interface SupertalkContext<T extends object> {
 
 async function setupSupertalk<T extends object>(
   service: T,
-  options: {autoProxy?: boolean; debug?: boolean} = {},
+  options: {nestedProxies?: boolean; debug?: boolean} = {},
 ): Promise<SupertalkContext<T>> {
   const {port1, port2} = new MessageChannel();
   expose(service, port1, options);
@@ -270,7 +270,7 @@ async function benchSimpleString(): Promise<BenchmarkSuite> {
   };
 
   const st = await setupSupertalk(service);
-  const stAuto = await setupSupertalk(service, {autoProxy: true});
+  const stAuto = await setupSupertalk(service, {nestedProxies: true});
   const cl = setupComlink(service);
 
   const [stResult, stAutoResult, clResult] = await runTripleBenchmark(
@@ -317,7 +317,7 @@ async function benchMultipleArgs(): Promise<BenchmarkSuite> {
   };
 
   const st = await setupSupertalk(service);
-  const stAuto = await setupSupertalk(service, {autoProxy: true});
+  const stAuto = await setupSupertalk(service, {nestedProxies: true});
   const cl = setupComlink(service);
 
   const [stResult, stAutoResult, clResult] = await runTripleBenchmark(
@@ -387,7 +387,7 @@ async function benchLargeObject(): Promise<BenchmarkSuite> {
   };
 
   const st = await setupSupertalk(service);
-  const stAuto = await setupSupertalk(service, {autoProxy: true});
+  const stAuto = await setupSupertalk(service, {nestedProxies: true});
   const cl = setupComlink(service);
 
   const [stResult, stAutoResult, clResult] = await runTripleBenchmark(
@@ -439,7 +439,7 @@ async function benchLargeArray(): Promise<BenchmarkSuite> {
   };
 
   const st = await setupSupertalk(service);
-  const stAuto = await setupSupertalk(service, {autoProxy: true});
+  const stAuto = await setupSupertalk(service, {nestedProxies: true});
   const cl = setupComlink(service);
 
   const [stResult, stAutoResult, clResult] = await runTripleBenchmark(
@@ -491,7 +491,7 @@ async function benchLargeArray(): Promise<BenchmarkSuite> {
 //   };
 //
 //   const st = await setupSupertalk(service);
-//   const stAuto = await setupSupertalk(service, {autoProxy: true});
+//   const stAuto = await setupSupertalk(service, {nestedProxies: true});
 //   const cl = setupComlink(service);
 //
 //   const [stResult, stAutoResult, clResult] = await runTripleBenchmark(
@@ -541,7 +541,7 @@ async function benchCallback(): Promise<BenchmarkSuite> {
   };
 
   const st = await setupSupertalk(service);
-  const stAuto = await setupSupertalk(service, {autoProxy: true});
+  const stAuto = await setupSupertalk(service, {nestedProxies: true});
   const cl = setupComlink(service);
 
   const [stResult, stAutoResult, clResult] = await runTripleBenchmark(
@@ -595,7 +595,7 @@ async function benchMultipleCallbacks(): Promise<BenchmarkSuite> {
   };
 
   const st = await setupSupertalk(service);
-  const stAuto = await setupSupertalk(service, {autoProxy: true});
+  const stAuto = await setupSupertalk(service, {nestedProxies: true});
   const cl = setupComlink(service);
 
   // eslint-disable-next-line @typescript-eslint/no-empty-function -- benchmark callbacks
@@ -652,7 +652,7 @@ async function benchRapidCalls(): Promise<BenchmarkSuite> {
   };
 
   const st = await setupSupertalk(service);
-  const stAuto = await setupSupertalk(service, {autoProxy: true});
+  const stAuto = await setupSupertalk(service, {nestedProxies: true});
   const cl = setupComlink(service);
 
   // Note: This benchmark manually handles its own calls-per-iteration
@@ -731,7 +731,7 @@ async function benchAutoProxyNested(): Promise<BenchmarkSuite> {
   const noop = (): void => {};
 
   // Supertalk - auto-proxy mode (nested callbacks work)
-  const stAuto = await setupSupertalk(service, {autoProxy: true});
+  const stAuto = await setupSupertalk(service, {nestedProxies: true});
   const autoResult = await runBenchmark(
     'auto-proxy-nested',
     'supertalk-autoproxy',

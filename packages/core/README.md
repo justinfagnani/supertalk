@@ -306,6 +306,32 @@ Proxied objects are tracked with registries on both sides.
 - **Consumer side**: Holds weak references; when GC'd, notifies source to
   release.
 
+## Benchmarks
+
+Supertalk vs Comlink vs Supertalk with `nestedProxies: true`, measured in
+ops/sec (higher is better). Node.js `worker_threads` with `MessageChannel`.
+
+| Benchmark                    | Supertalk  |   Comlink | ST vs Comlink | Supertalk w/ <br> nestedProxies | nested vs <br> shallow |
+| ---------------------------- | ---------: | --------: | ------------: | ------------------------------: | ---------------------: |
+| Simple String Echo           | 168,597    |    94,543 |         1.78x |                         173,684 |                  1.03x |
+| Multiple Arguments (4 nums)  | 163,503    |    84,546 |         1.93x |                         163,420 |                     1x |
+| Large Object (~10KB)         |  26,257    |    23,714 |         1.11x |                          12,886 |                  0.49x |
+| Large Array (10,000 items)   |     313    |       309 |         1.01x |                             163 |                  0.52x |
+| Callback (proxy function)    |   3,742    |     3,469 |         1.08x |                           3,607 |                  0.96x |
+| Multiple Callbacks (3 funcs) |   1,748    |     1,576 |         1.11x |                           1,856 |                  1.06x |
+| Rapid Sequential (20x burst) | 190,164    |   103,191 |         1.84x |                         179,378 |                  0.94x |
+
+**Notes:**
+
+- Supertalk appears to have lower per-call and per-object overhead, which makes
+  it faster in the multiple call and multiple argument cases, and similar in the
+  one large object or array cases.
+- For simple calls and bursts, Supertalk is ~1.8-1.9x faster than Comlink
+- `nestedProxies` mode adds traversal overhead for large payloads. The
+  performance impact ranges from negligible for small objects to 2x slower for
+  large graphs and arrays.
+- Run the benchmarks with: `npm run bench -w @supertalk/core`
+
 ## Background
 
 ### Why Supertalk?
