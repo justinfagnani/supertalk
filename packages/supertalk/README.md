@@ -1,9 +1,7 @@
-# @supertalk/core
+# Supertalk
 
 A type-safe, unified communication library for Web Workers, Iframes, and Node.js
 worker threads.
-
-## Overview
 
 **Supertalk turns workers' low-level message passing into a high-level,
 type-safe RPC layer—so you can call methods, pass callbacks, and await promises
@@ -17,20 +15,23 @@ Supertalk is built to be a joy to use and deploy:
 - **Fast & small:** ~2.3 kB brotli-compressed, zero dependencies
 - **Composable & extendable:** Non-global configuration, nested objects,
   services are just classes, composable transport handlers
-- **Standard modules:** Some people call them "ESM". We don't publish CJS.
+- **Standard modules:** ESM-only, no CommonJS
 
 ## Installation
 
 ```bash
-npm install @supertalk/core
+npm install supertalk
 ```
+
+This package re-exports `@supertalk/core`. As additional packages are added to
+the Supertalk ecosystem, they may be included here as well.
 
 ## Quick Start
 
-`worker.ts` (exposed side):
+**worker.ts** (exposed side):
 
 ```ts
-import {expose} from '@supertalk/core';
+import {expose} from 'supertalk';
 
 const service = {
   add(a: number, b: number): number {
@@ -45,10 +46,10 @@ const service = {
 expose(service, self);
 ```
 
-`main.ts` (wrapped side):
+**main.ts** (wrapped side):
 
 ```ts
-import {wrap} from '@supertalk/core';
+import {wrap} from 'supertalk';
 
 const worker = new Worker('./worker.ts');
 const remote = await wrap<typeof service>(worker);
@@ -56,6 +57,33 @@ const remote = await wrap<typeof service>(worker);
 // Methods become async
 const result = await remote.add(1, 2); // 3
 ```
+
+## Core Concepts
+
+### Requests and Responses
+
+Most cross-worker communication follows a request/response pattern, but
+`postMessage()` only sends one-way messages. Matching responses to requests is
+left as an exercise to the developer. Supertalk builds a request/response
+protocol on top of `postMessage()`, so you can call methods and await results
+naturally.
+
+### Clones vs Proxies
+
+`postMessage()` copies payloads via the structured clone algorithm, which only
+supports a limited set of types. Functions are completely unsupported, and class
+instances lose their prototypes—so things like Promises don't survive the trip.
+
+Supertalk addresses this by _proxying_ values that can't be cloned. A proxied
+object stays on its original side; the other side gets a lightweight proxy that
+forwards calls back. This is how functions, promises, and class instances work
+across the message boundary.
+
+### Shallow vs Deep Proxying
+
+By default, Supertalk only proxies objects passed directly to or returned from
+method calls. This keeps messages fast. If you need proxies nested anywhere in a
+payload, set `nestedProxies: true` to traverse the full object graph.
 
 ## Core Features
 
@@ -101,7 +129,7 @@ proxied instead of cloned.
 `worker.ts`:
 
 ```ts
-import {expose, proxy} from '@supertalk/core';
+import {expose, proxy} from 'supertalk';
 
 export class Widget {
   count = 42;
@@ -166,7 +194,7 @@ Use `transfer()` to mark values like `ArrayBuffer`, `MessagePort`, or streams to
 be transferred rather than cloned.
 
 ```ts
-import {transfer} from '@supertalk/core';
+import {transfer} from 'supertalk';
 
 const service = {
   getBuffer(): ArrayBuffer {
@@ -230,7 +258,8 @@ Marks an object to be proxied rather than cloned. Use this for:
 Marks a value to be transferred (zero-copy) rather than cloned.
 
 - `value`: The value to send (e.g. `ArrayBuffer`, `MessagePort`).
-- `transferables`: Optional array of transferables. If omitted, `value` is assumed to be the transferable.
+- `transferables`: Optional array of transferables. If omitted, `value` is
+  assumed to be the transferable.
 
 ### Options
 
@@ -252,7 +281,7 @@ Handlers provide pluggable serialization for custom types or streams.
 **Stream Handler Example:**
 
 ```ts
-import {streamHandler} from '@supertalk/core/handlers/streams.js';
+import {streamHandler} from 'supertalk/handlers/streams.js';
 
 expose(service, self, {handlers: [streamHandler]});
 const remote = await wrap<typeof service>(worker, {handlers: [streamHandler]});
@@ -305,35 +334,16 @@ Proxied objects are tracked with registries on both sides.
 - **Consumer side**: Holds weak references; when GC'd, notifies source to
   release.
 
-## Benchmarks
+## Ecosystem
 
-Supertalk vs Comlink vs Supertalk with `nestedProxies: true`, measured in
-ops/sec (higher is better). Node.js `worker_threads` with `MessageChannel`.
+This package re-exports `@supertalk/core`. Additional packages are available for
+extended functionality:
 
-| Benchmark                    | Supertalk  |   Comlink | ST vs Comlink | Supertalk w/ <br> nestedProxies | nested vs <br> shallow |
-| ---------------------------- | ---------: | --------: | ------------: | ------------------------------: | ---------------------: |
-| Simple String Echo           | 168,597    |    94,543 |         1.78x |                         173,684 |                  1.03x |
-| Multiple Arguments (4 nums)  | 163,503    |    84,546 |         1.93x |                         163,420 |                     1x |
-| Large Object (~10KB)         |  26,257    |    23,714 |         1.11x |                          12,886 |                  0.49x |
-| Large Array (10,000 items)   |     313    |       309 |         1.01x |                             163 |                  0.52x |
-| Callback (proxy function)    |   3,742    |     3,469 |         1.08x |                           3,607 |                  0.96x |
-| Multiple Callbacks (3 funcs) |   1,748    |     1,576 |         1.11x |                           1,856 |                  1.06x |
-| Rapid Sequential (20x burst) | 190,164    |   103,191 |         1.84x |                         179,378 |                  0.94x |
+| Package                                                               | Description                                       |
+| --------------------------------------------------------------------- | ------------------------------------------------- |
+| [@supertalk/signals](https://www.npmjs.com/package/@supertalk/signals) | TC39 Signals integration for reactive state sync |
 
-**Notes:**
-
-- Supertalk appears to have lower per-call and per-object overhead, which makes
-  it faster in the multiple call and multiple argument cases, and similar in the
-  one large object or array cases.
-- For simple calls and bursts, Supertalk is ~1.8-1.9x faster than Comlink
-- `nestedProxies` mode adds traversal overhead for large payloads. The
-  performance impact ranges from negligible for small objects to 2x slower for
-  large graphs and arrays.
-- Run the benchmarks with: `npm run bench -w @supertalk/core`
-
-## Background
-
-### Why Supertalk?
+## Why Supertalk?
 
 Workers are great for offloading work, but the raw `postMessage` API is
 difficult:
@@ -349,14 +359,16 @@ lifetime management, and deep traversal.
 
 ### Comparison to Comlink
 
-Supertalk is inspired by Comlink but differs in key ways:
+Supertalk is inspired by [Comlink](https://github.com/GoogleChromeLabs/comlink)
+but improves on it:
 
-- **Automatic proxying:** Functions/promises are auto-proxied.
+- **Automatic proxying:** Functions/promises are auto-proxied without special
+  wrappers
 - **Nested support:** `nestedProxies` mode allows proxies anywhere in the
-  payload.
-- **Debug mode:** Reports exactly where non-serializable values are.
-- **Symmetric:** Both ends use the same `Connection` class.
-- **No MessagePorts:** Uses the worker/window directly, making it lighter.
+  payload
+- **Debug mode:** Reports exactly where non-serializable values are
+- **Symmetric:** Both ends use the same internal architecture
+- **Type-safe:** Better TypeScript inference for what's proxied vs cloned
 
 ## License
 
