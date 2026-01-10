@@ -1,6 +1,6 @@
 {
   "name": "supertalk",
-  "version": "0.0.1",
+  "version": "0.0.0",
   "description": "Type-safe client/server communication for workers, iframes, and RPC",
   "type": "module",
   "exports": {
@@ -53,7 +53,7 @@
     "directory": "packages/supertalk"
   },
   "dependencies": {
-    "@supertalk/core": "0.0.1"
+    "@supertalk/core": "0.0.0"
   },
   "devDependencies": {
     "typescript": "^5.7.2"
