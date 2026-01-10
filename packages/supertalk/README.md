@@ -339,8 +339,8 @@ Proxied objects are tracked with registries on both sides.
 This package re-exports `@supertalk/core`. Additional packages are available for
 extended functionality:
 
-| Package                                                               | Description                                       |
-| --------------------------------------------------------------------- | ------------------------------------------------- |
+| Package                                                                | Description                                      |
+| ---------------------------------------------------------------------- | ------------------------------------------------ |
 | [@supertalk/signals](https://www.npmjs.com/package/@supertalk/signals) | TC39 Signals integration for reactive state sync |
 
 ## Why Supertalk?

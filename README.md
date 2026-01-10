@@ -75,11 +75,11 @@ const result = await remote.add(1, 2); // 3
 
 ## Packages
 
-| Package                                                  | Description                                       |
-| -------------------------------------------------------- | ------------------------------------------------- |
-| [supertalk](./packages/supertalk/)                       | Convenience package, re-exports @supertalk/core   |
-| [@supertalk/core](./packages/core/)                      | Core RPC and proxy library                        |
-| [@supertalk/signals](./packages/signals/)                | TC39 Signals integration for reactive state sync  |
+| Package                                   | Description                                      |
+| ----------------------------------------- | ------------------------------------------------ |
+| [supertalk](./packages/supertalk/)        | Convenience package, re-exports @supertalk/core  |
+| [@supertalk/core](./packages/core/)       | Core RPC and proxy library                       |
+| [@supertalk/signals](./packages/signals/) | TC39 Signals integration for reactive state sync |
 
 ## Documentation
 

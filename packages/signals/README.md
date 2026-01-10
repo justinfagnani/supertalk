@@ -51,7 +51,9 @@ import {SignalManager} from '@supertalk/signals';
 
 const worker = new Worker('./worker.ts');
 const manager = new SignalManager(worker);
-const remote = await wrap<typeof service>(worker, {handlers: [manager.handler]});
+const remote = await wrap<typeof service>(worker, {
+  handlers: [manager.handler],
+});
 
 // Get the remote signal (initial value available synchronously)
 const count = await remote.getCount();
@@ -64,7 +66,7 @@ console.log(quadrupled.get()); // 0
 // Mutate on worker side
 await remote.increment();
 // After microtask, updates propagate
-console.log(count.get());     // 1
+console.log(count.get()); // 1
 console.log(quadrupled.get()); // 4
 ```
 
@@ -94,8 +96,8 @@ service.
 ```ts
 const count = await remote.getCount(); // RemoteSignal<number>
 
-count.get();     // Read current value (reactive)
-count.set(42);   // Throws! RemoteSignals are read-only
+count.get(); // Read current value (reactive)
+count.set(42); // Throws! RemoteSignals are read-only
 ```
 
 RemoteSignals integrate with the TC39 Signals reactivity system:
