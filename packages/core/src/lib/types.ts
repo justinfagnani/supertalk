@@ -197,7 +197,8 @@ export type Message =
   | ThrowMessage
   | ReleaseMessage
   | PromiseResolveMessage
-  | PromiseRejectMessage;
+  | PromiseRejectMessage
+  | HandlerMessage;
 
 /**
  * Action type for CallMessage.
@@ -260,6 +261,18 @@ export interface PromiseRejectMessage {
   type: 'promise-reject';
   promiseId: number;
   error: SerializedError;
+}
+
+/**
+ * Message sent between handlers on different sides of a connection.
+ * Used for subscription updates, backpressure, releases, etc.
+ */
+export interface HandlerMessage {
+  type: 'handler-message';
+  /** Routes to the handler with matching wireType */
+  wireType: string;
+  /** Handler-defined payload, serialized through toWire/fromWire */
+  payload: WireValue;
 }
 
 /**
@@ -402,7 +415,7 @@ export interface ProxyPropertyMetadata {
  * Handlers use `toWire()` to convert nested values. Combine with
  * the public marker APIs for special handling:
  * - `ctx.toWire(proxy(obj))` — proxy an object
- * - `ctx.toWire(transfer(stream))` — transfer a transferable
+ * - `ctx.toWire(transfer(stream))` — add to transfer list
  * - `ctx.toWire(value, key)` — process with path tracking
  */
 export interface ToWireContext {
@@ -427,6 +440,19 @@ export interface FromWireContext {
 }
 
 /**
+ * Context provided to handlers when connected to a connection.
+ * Allows handlers to send messages to their remote counterpart.
+ */
+export interface HandlerConnectionContext {
+  /**
+   * Send a message to the handler with the same wireType on the remote side.
+   * The payload goes through toWire serialization, so nested values
+   * (including functions with nestedProxies) are handled correctly.
+   */
+  sendMessage(payload: unknown): void;
+}
+
+/**
  * A pluggable handler for custom serialization/deserialization.
  *
  * Handlers can transform values during wire transmission. Use cases:
@@ -434,13 +460,20 @@ export interface FromWireContext {
  * - Streams: ReadableStream/WritableStream transferred
  * - Custom types: Domain-specific serialization
  *
+ * Handlers may also implement lifecycle methods for subscription-oriented
+ * data types (signals, streams, observables):
+ * - `connect()` — Called when attached to a connection, provides messaging context
+ * - `onMessage()` — Called when a message arrives for this handler's wireType
+ * - `disconnect()` — Called when the connection closes
+ *
  * @typeParam T - The type this handler handles (e.g., Map<K, V>)
  * @typeParam W - The wire format type (must extend object with WIRE_TYPE)
  */
 export interface Handler<T = unknown, W extends object = object> {
   /**
    * Unique wire type identifier for this handler.
-   * Used to route deserialization. Convention: 'handler:<name>' or 'transfer:<name>'
+   * Used to route deserialization and handler messages.
+   * Convention: 'signal', 'stream', '<package>:<name>', 'app:<name>'
    */
   wireType: string;
 
@@ -455,9 +488,9 @@ export interface Handler<T = unknown, W extends object = object> {
    * Convert the value to wire format.
    *
    * Use context methods to build wire values:
-   * - ctx.process(proxy(value)) — proxy the value
-   * - ctx.process(value, key) — recursively process nested values
-   * - ctx.process(transfer(value)) — add to transfer list
+   * - ctx.toWire(proxy(value)) — proxy the value
+   * - ctx.toWire(value, key) — recursively process nested values
+   * - ctx.toWire(transfer(value)) — add to transfer list
    *
    * Return either:
    * - A wire value from a context method
@@ -471,4 +504,25 @@ export interface Handler<T = unknown, W extends object = object> {
    * Optional — not needed for proxied or transferred values.
    */
   fromWire?(wire: W, ctx: FromWireContext): T;
+
+  /**
+   * Called when the handler is attached to a connection.
+   * Use this to store the context for sending messages later.
+   * Optional — only needed for subscription-oriented handlers.
+   */
+  connect?(ctx: HandlerConnectionContext): void;
+
+  /**
+   * Called when a message arrives for this handler's wireType.
+   * The payload has already been deserialized through fromWire.
+   * Optional — only needed for subscription-oriented handlers.
+   */
+  onMessage?(payload: unknown, ctx: FromWireContext): void;
+
+  /**
+   * Called when the connection closes.
+   * Use this to clean up resources (unwatching signals, closing streams, etc.).
+   * Optional — only needed for subscription-oriented handlers.
+   */
+  disconnect?(): void;
 }

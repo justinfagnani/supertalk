@@ -24,7 +24,8 @@ Handlers provide a pluggable way to customize how values are serialized and dese
 interface Handler<T = unknown, W extends object = object> {
   /**
    * Unique wire type identifier for this handler.
-   * Used to route deserialization. Convention: 'handler:<name>'
+   * Used to route deserialization and handler messages.
+   * Convention: 'signal', 'stream', '<package>:<name>', 'app:<name>'
    */
   wireType: string;
 
@@ -39,68 +40,84 @@ interface Handler<T = unknown, W extends object = object> {
    * Serialize the value for wire transmission.
    *
    * Use context methods to build safe, well-formed wire values:
-   * - ctx.proxy(value) — proxy the value (returns WireProxy)
-   * - ctx.process(value, path) — recursively process nested values
-   * - ctx.promise(promise) — register a promise (returns WirePromise)
+   * - ctx.toWire(proxy(value)) — proxy the value
+   * - ctx.toWire(value, key) — recursively process nested values
+   * - ctx.toWire(transfer(value)) — add to transfer list
    *
    * Return either:
    * - A wire value from a context method (proxy, promise)
-   * - A custom wire object (will be tagged with handler's wireType)
+   * - A custom wire object with [WIRE_TYPE] set to this handler's wireType
    */
-  serialize(value: T, ctx: SerializeContext): WireValue;
+  toWire(value: T, ctx: ToWireContext): WireValue;
 
   /**
    * Deserialize a value from wire format.
    * Only called for custom wire objects (not proxy/promise results).
-   * The wire object is the custom data you returned from serialize().
+   * The wire object is the custom data you returned from toWire().
    */
-  deserialize?(wire: W, ctx: DeserializeContext): T;
+  fromWire?(wire: W, ctx: FromWireContext): T;
+
+  // --- Lifecycle methods (optional, for subscription-oriented handlers) ---
+
+  /**
+   * Called when the handler is attached to a connection.
+   * Use this to store the context for sending messages later.
+   */
+  connect?(ctx: HandlerConnectionContext): void;
+
+  /**
+   * Called when a message arrives for this handler's wireType.
+   * The payload has already been deserialized through fromWire.
+   */
+  onMessage?(payload: unknown): void;
+
+  /**
+   * Called when the connection closes.
+   * Use this to clean up resources (unwatching signals, closing streams, etc.).
+   */
+  disconnect?(): void;
 }
 ```
 
-### SerializeContext
+### ToWireContext
 
 Handlers use context methods to create well-formed wire values. Handlers never
 deal with IDs directly — the context handles all registration and bookkeeping.
 
 ```typescript
-interface SerializeContext {
-  /**
-   * Proxy a value — creates a remote reference.
-   * Handles registration, ID assignment, and round-trip detection.
-   */
-  proxy(value: object): WireProxy;
-
-  /**
-   * Register a promise for remote resolution.
-   */
-  promise(value: Promise<unknown>): WirePromise;
-
+interface ToWireContext {
   /**
    * Recursively process a nested value.
    * Applies handlers and default behavior, returns wire-safe value.
    * @param key Optional key/index for error path building
    */
-  process(value: unknown, key?: string | number): WireValue;
-
-  /**
-   * Add a value to the transfer list.
-   * Transferred values are moved (not copied) across the boundary.
-   * Use for ArrayBuffer, MessagePort, ReadableStream, etc.
-   */
-  transfer(value: Transferable): void;
+  toWire(value: unknown, key?: string | number): WireValue;
 }
 ```
 
-### DeserializeContext
+### FromWireContext
 
 ```typescript
-interface DeserializeContext {
+interface FromWireContext {
   /**
    * Recursively process a nested wire value.
    * Handles proxies, promises, and nested handler values.
    */
-  process(wire: WireValue): unknown;
+  fromWire(wire: WireValue): unknown;
+}
+```
+
+### HandlerConnectionContext
+
+For handlers that need to send messages outside of RPC calls:
+
+```typescript
+interface HandlerConnectionContext {
+  /**
+   * Send a message to the remote handler with the same wireType.
+   * The payload is serialized through toWire before sending.
+   */
+  sendMessage(payload: unknown): void;
 }
 ```
 
@@ -132,16 +149,15 @@ const service = {
 
 Transferables are special — `postMessage` handles their serialization automatically.
 A transferred `ReadableStream` arrives as a `ReadableStream`. Handlers for
-transferables just need to add to the transfer list; deserialization is automatic.
+transferables just need to use `transfer()` — no `fromWire` is needed.
 
 ```typescript
-// Simple stream handler — no deserialize needed
+// Simple stream handler — transfer handles serialization
 const readableStreamHandler: Handler<ReadableStream> = {
   wireType: 'transfer:readable-stream',
   canHandle: (v): v is ReadableStream => v instanceof ReadableStream,
-  serialize(stream, ctx) {
-    ctx.transfer(stream);
-    return stream; // Return as-is, postMessage handles it
+  toWire(stream, ctx) {
+    return ctx.toWire(transfer(stream));
   },
 };
 ```
@@ -190,11 +206,11 @@ wrap<Service>(endpoint, {handlers: [mapHandler, setHandler]});
 const mapProxyHandler: Handler<Map<unknown, unknown>> = {
   wireType: 'handler:map-proxy',
   canHandle: (v): v is Map<unknown, unknown> => v instanceof Map,
-  serialize(value, ctx) {
+  toWire(value, ctx) {
     // Proxy the Map — methods like get/set work remotely
-    return ctx.proxy(value);
+    return ctx.toWire(proxy(value));
   },
-  // No deserialize needed — it's a proxy
+  // No fromWire needed — it's a proxy
 };
 ```
 
@@ -209,19 +225,19 @@ interface MapWire {
 const mapCloneHandler: Handler<Map<unknown, unknown>, MapWire> = {
   wireType: 'handler:map',
   canHandle: (v): v is Map<unknown, unknown> => v instanceof Map,
-  serialize(value, ctx) {
+  toWire(value, ctx) {
     // Return fully-formed wire value with custom wire type
     return {
       [WIRE_TYPE]: 'handler:map',
       entries: [...value.entries()].map(([k, v]) => [
-        ctx.process(k),
-        ctx.process(v),
+        ctx.toWire(k),
+        ctx.toWire(v),
       ]),
     };
   },
-  deserialize(wire, ctx) {
+  fromWire(wire, ctx) {
     return new Map(
-      wire.entries.map(([k, v]) => [ctx.process(k), ctx.process(v)]),
+      wire.entries.map(([k, v]) => [ctx.fromWire(k), ctx.fromWire(v)]),
     );
   },
 };
@@ -238,14 +254,14 @@ interface SetWire {
 const setCloneHandler: Handler<Set<unknown>, SetWire> = {
   wireType: 'handler:set',
   canHandle: (v): v is Set<unknown> => v instanceof Set,
-  serialize(value, ctx) {
+  toWire(value, ctx) {
     return {
       [WIRE_TYPE]: 'handler:set',
-      values: [...value].map((v) => ctx.process(v)),
+      values: [...value].map((v) => ctx.toWire(v)),
     };
   },
-  deserialize(wire, ctx) {
-    return new Set(wire.values.map((v) => ctx.process(v)));
+  fromWire(wire, ctx) {
+    return new Set(wire.values.map((v) => ctx.fromWire(v)));
   },
 };
 ```
@@ -256,16 +272,10 @@ const setCloneHandler: Handler<Set<unknown>, SetWire> = {
 const readableStreamHandler: Handler<ReadableStream> = {
   wireType: 'readable-stream',
   canHandle: (v): v is ReadableStream => v instanceof ReadableStream,
-  serialize(stream, ctx) {
-    ctx.transfer(stream);
-    return {
-      [WIRE_TYPE]: 'readable-stream',
-      stream,
-    };
+  toWire(stream, ctx) {
+    return ctx.toWire(transfer(stream));
   },
-  deserialize(wire) {
-    return wire.stream;
-  },
+  // No fromWire needed — transferred streams arrive as-is
 };
 ```
 
@@ -275,15 +285,8 @@ const readableStreamHandler: Handler<ReadableStream> = {
 const writableStreamHandler: Handler<WritableStream> = {
   wireType: 'writable-stream',
   canHandle: (v): v is WritableStream => v instanceof WritableStream,
-  serialize(stream, ctx) {
-    ctx.transfer(stream);
-    return {
-      [WIRE_TYPE]: 'writable-stream',
-      stream,
-    };
-  },
-  deserialize(wire) {
-    return wire.stream;
+  toWire(stream, ctx) {
+    return ctx.toWire(transfer(stream));
   },
 };
 ```
@@ -296,12 +299,87 @@ For auto-transferring ArrayBuffers (opt-in, since transfer neuters the original)
 const arrayBufferTransferHandler: Handler<ArrayBuffer> = {
   wireType: 'transfer:array-buffer',
   canHandle: (v): v is ArrayBuffer => v instanceof ArrayBuffer,
-  serialize(buffer, ctx) {
-    ctx.transfer(buffer);
-    return buffer;
+  toWire(buffer, ctx) {
+    return ctx.toWire(transfer(buffer));
   },
 };
 ```
+
+## Subscription Handlers
+
+Some handlers need to send updates outside of RPC calls. For example, a signal
+handler must push updates when signal values change on the sender side.
+
+The handler lifecycle provides this capability:
+
+```typescript
+class SignalHandler implements Handler<Signal, WireSignal> {
+  wireType = 'signal';
+  #ctx: HandlerConnectionContext | undefined;
+  #signals = new Map<number, Signal>();
+
+  // Called when handler is attached to connection
+  connect(ctx: HandlerConnectionContext) {
+    this.#ctx = ctx;
+    // Set up a watcher that sends updates when signals change
+    this.#watcher = new Signal.subtle.Watcher(() => {
+      this.#flushUpdates();
+    });
+  }
+
+  // Called when connection closes
+  disconnect() {
+    this.#ctx = undefined;
+    this.#watcher?.unwatch();
+    this.#signals.clear();
+  }
+
+  // Called when a message arrives for this wireType
+  onMessage(payload: unknown) {
+    if (isSignalUpdate(payload)) {
+      // Update local signal with new value
+      this.#signals.get(payload.id)?._update(payload.value);
+    }
+  }
+
+  canHandle(v): v is Signal {
+    return v instanceof Signal.State || v instanceof Signal.Computed;
+  }
+
+  toWire(signal, ctx) {
+    const id = this.#registerSignal(signal);
+    return {
+      [WIRE_TYPE]: 'signal',
+      id,
+      value: ctx.toWire(signal.get()),
+    };
+  }
+
+  fromWire(wire, ctx) {
+    return new RemoteSignal(wire.id, ctx.fromWire(wire.value));
+  }
+
+  #flushUpdates() {
+    // Collect changed signals and send batch update
+    const updates = this.#collectPendingUpdates();
+    if (updates.length > 0) {
+      this.#ctx?.sendMessage({type: 'signal:batch', updates});
+    }
+  }
+}
+```
+
+The key points:
+
+1. **`connect(ctx)`** is called when `expose()` or `wrap()` attaches the handler
+2. **`ctx.sendMessage()`** serializes the payload through `toWire` and sends it
+3. **`onMessage()`** receives messages sent by the remote handler (already deserialized)
+4. **`disconnect()`** is called when `Connection.close()` is invoked
+   return buffer;
+   },
+   };
+
+````
 
 ## Performance Considerations
 
@@ -330,12 +408,12 @@ if (value === null || typeof value !== 'object') {
 // Check handlers (first match wins)
 for (const handler of handlers) {
   if (handler.canHandle(value)) {
-    return handler.serialize(value, context);
+    return handler.toWire(value, context);
   }
 }
 
 // Default behavior...
-```
+````
 
 ### Type Checks in canHandle()
 
@@ -356,23 +434,23 @@ canHandle: (v): v is MyClass => v?.constructor === MyClass,
 Handlers have **full control** over traversal. There's no automatic traversal
 of handler results — what you return is what goes on the wire (after tagging).
 
-**To traverse nested values**, call `ctx.process()`:
+**To traverse nested values**, call `ctx.toWire()`:
 
 ```typescript
-serialize(value, ctx) {
+toWire(value, ctx) {
   return {
     entries: [...value.entries()].map(([k, v]) => [
-      ctx.process(k),    // Recursively process
-      ctx.process(v),    // Recursively process
+      ctx.toWire(k),    // Recursively process
+      ctx.toWire(v),    // Recursively process
     ]),
   };
 }
 ```
 
-**To skip traversal**, just don't call `ctx.process()`:
+**To skip traversal**, just don't call `ctx.toWire()`:
 
 ```typescript
-serialize(value, ctx) {
+toWire(value, ctx) {
   // Return raw data — no nested processing
   return { data: value.toJSON() };
 }
@@ -386,12 +464,12 @@ A handler could implement "proxy nested objects one level deep":
 const shallowPlusOne: Handler<object> = {
   wireType: 'handler:shallow-plus-one',
   canHandle: (v): v is object => isPlainObject(v),
-  serialize(value, ctx) {
+  toWire(value, ctx) {
     const result: Record<string, WireValue> = {};
     for (const [k, v] of Object.entries(value)) {
       if (typeof v === 'object' && v !== null) {
         // Proxy objects one level down
-        result[k] = ctx.proxy(v);
+        result[k] = ctx.toWire(proxy(v));
       } else {
         // Primitives pass through
         result[k] = v;
@@ -399,10 +477,10 @@ const shallowPlusOne: Handler<object> = {
     }
     return result;
   },
-  deserialize(wire, ctx) {
+  fromWire(wire, ctx) {
     const result: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(wire)) {
-      result[k] = ctx.process(v);
+      result[k] = ctx.fromWire(v);
     }
     return result;
   },
@@ -453,14 +531,14 @@ Should we validate this? Options:
    - ReadableStream, WritableStream (transfer)
    - ArrayBuffer (transfer)
 
-3. **Phase 3**: Signals integration
+3. **Phase 3**: Signals integration ✅
    - TC39 Signal handler
    - Subscription lifecycle management
 
 ## Appendix: Wire Value Flow
 
 ```
-                    toWireValue()
+                      #toWire()
 Local Value ──────────────────────────> Wire Value
      │                                       │
      │  1. Check LocalProxy marker → proxy   │
@@ -469,14 +547,14 @@ Local Value ──────────────────────�
      │  4. Check existing remote → proxy     │
      │  5. Check promise → WirePromise       │
      │  6. >>> Check handlers <<<            │
-     │     - canHandle()? → serialize()      │
+     │     - canHandle()? → toWire()         │
      │     - Return handler's wire value     │
      │  7. Array/plain object → traverse?    │
      │  8. Class instance → proxy            │
      │                                       │
      └───────────────────────────────────────┘
 
-                   fromWireValue()
+                    #fromWire()
 Wire Value ──────────────────────────> Local Value
      │                                       │
      │  1. WireProxy → create/get proxy      │
@@ -485,43 +563,22 @@ Wire Value ───────────────────────
      │  4. WireThrown → throw error          │
      │  5. >>> Handler wireType? <<<         │
      │     - Look up handler by wireType     │
-     │     - Call deserialize()              │
+     │     - Call fromWire()                 │
      │  6. Raw value → traverse if nested    │
      │                                       │
      └───────────────────────────────────────┘
 ```
 
-### SerializeContext Implementation
+### ToWireContext Implementation
 
 The context passed to handlers wraps Connection methods:
 
 ```typescript
-class SerializeContextImpl implements SerializeContext {
-  #connection: Connection;
-  #transferList: Transferable[];
-  #path: string;
-
-  proxy(value: object): WireProxy {
-    // Check round-trip first
-    const existingId = this.#connection.getRemoteId(value);
-    if (existingId !== undefined) {
-      return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
-    }
-    const proxyId = this.#connection.registerLocal(value);
-    return {[WIRE_TYPE]: 'proxy', proxyId};
-  }
-
-  promise(value: Promise<unknown>): WirePromise {
-    const promiseId = this.#connection.registerPromise(value);
-    return {[WIRE_TYPE]: 'promise', promiseId};
-  }
-
-  process(value: unknown, path: string): WireValue {
-    return this.#connection.toWireValue(value, `${this.#path}.${path}`);
-  }
-
-  transfer(value: Transferable): void {
-    this.#transferList.push(value);
-  }
-}
+// Simplified — actual implementation is inline in Connection
+const toWireContext: ToWireContext = {
+  toWire(value: unknown, key?: string | number): WireValue {
+    const path = key !== undefined ? `${currentPath}.${key}` : currentPath;
+    return connection.#toWire(value, path, transfers);
+  },
+};
 ```

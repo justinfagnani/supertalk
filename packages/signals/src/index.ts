@@ -7,21 +7,19 @@
  * @example
  * ```ts
  * import {expose, wrap} from '@supertalk/core';
- * import {SignalManager} from '@supertalk/signals';
+ * import {SignalHandler} from '@supertalk/signals';
  * import {Signal} from 'signal-polyfill';
  *
  * // === Worker (sender) ===
- * const manager = new SignalManager(self);
  * const count = new Signal.State(0);
  *
  * expose({
  *   get count() { return count; },
  *   increment() { count.set(count.get() + 1); }
- * }, self, { handlers: [manager.handler] });
+ * }, self, { handlers: [new SignalHandler()] });
  *
  * // === Main (receiver) ===
- * const manager = new SignalManager(worker);
- * const remote = wrap<Service>(worker, { handlers: [manager.handler] });
+ * const remote = wrap<Service>(worker, { handlers: [new SignalHandler()] });
  *
  * const countSignal = await remote.count;
  * console.log(countSignal.get());  // 0 (initial value, synchronous)
@@ -36,7 +34,7 @@
  * @packageDocumentation
  */
 
-export {SignalManager} from './lib/signal-manager.js';
+export {SignalHandler} from './lib/signal-handler.js';
 export {RemoteSignal} from './lib/remote-signal.js';
 export type {
   AnySignal,

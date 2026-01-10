@@ -14,7 +14,7 @@
 import {MessageChannel, type MessagePort} from 'node:worker_threads';
 import {expose, wrap} from '@supertalk/core';
 import type {Remote, Options} from '@supertalk/core';
-import {SignalManager} from '../../index.js';
+import {SignalHandler} from '../../index.js';
 
 /**
  * A disposable test context that sets up a service and remote proxy with signal support.
@@ -22,10 +22,10 @@ import {SignalManager} from '../../index.js';
 export interface SignalServiceContext<R> {
   /** The wrapped remote proxy for calling the service */
   remote: R;
-  /** Signal manager for the sender (expose) side */
-  senderManager: SignalManager;
-  /** Signal manager for the receiver (wrap) side */
-  receiverManager: SignalManager;
+  /** Signal handler for the sender (expose) side */
+  senderHandler: SignalHandler;
+  /** Signal handler for the receiver (wrap) side */
+  receiverHandler: SignalHandler;
   /** The underlying ports (exposed for advanced use cases) */
   port1: MessagePort;
   port2: MessagePort;
@@ -52,34 +52,29 @@ export async function setupSignalService<T extends object>(
 ): Promise<SignalServiceContext<Remote<T>>> {
   const {port1, port2} = new MessageChannel();
 
-  // Create signal managers for both sides
-  const senderManager = new SignalManager(port1);
-  const receiverManager = new SignalManager(port2);
+  // Create signal handlers for both sides
+  const senderHandler = new SignalHandler();
+  const receiverHandler = new SignalHandler();
 
   // Expose with signal handler
   expose(service, port1, {
     ...options,
-    handlers: [senderManager.handler, ...((options as Options).handlers ?? [])],
+    handlers: [senderHandler, ...((options as Options).handlers ?? [])],
   });
 
   // Wrap with signal handler
   const remote = await wrap<T>(port2, {
     ...options,
-    handlers: [
-      receiverManager.handler,
-      ...((options as Options).handlers ?? []),
-    ],
+    handlers: [receiverHandler, ...((options as Options).handlers ?? [])],
   });
 
   return {
     remote,
-    senderManager,
-    receiverManager,
+    senderHandler,
+    receiverHandler,
     port1,
     port2,
     [Symbol.dispose]() {
-      senderManager.dispose();
-      receiverManager.dispose();
       port1.close();
       port2.close();
     },

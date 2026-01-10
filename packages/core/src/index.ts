@@ -38,6 +38,7 @@ export type {
   Handler,
   ToWireContext,
   FromWireContext,
+  HandlerConnectionContext,
 } from './lib/types.js';
 
 // Re-export WIRE_TYPE for handlers that need to construct wire values

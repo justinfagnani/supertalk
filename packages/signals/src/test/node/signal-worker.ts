@@ -9,14 +9,14 @@
 import {parentPort, workerData} from 'node:worker_threads';
 import {expose} from '@supertalk/core';
 import {Signal} from 'signal-polyfill';
-import {SignalManager} from '../../index.js';
+import {SignalHandler} from '../../index.js';
 
 if (!parentPort) {
   throw new Error('This file must be run as a worker');
 }
 
-// Create signal manager for this worker
-const manager = new SignalManager(parentPort);
+// Create signal handler for this worker
+const signalHandler = new SignalHandler();
 
 // Get the service type from workerData
 const serviceType = (workerData as {serviceType?: string} | undefined)
@@ -68,5 +68,5 @@ switch (serviceType) {
 
 // Expose the service with signal handler
 expose(service, parentPort, {
-  handlers: [manager.handler],
+  handlers: [signalHandler],
 });

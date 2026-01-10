@@ -23,6 +23,7 @@ import type {
   Handler,
   ToWireContext,
   FromWireContext,
+  HandlerConnectionContext,
 } from './types.js';
 import {isWireProxy, isWirePromise} from './types.js';
 import {PROXY_PROPERTY_BRAND, WIRE_TYPE, HANDSHAKE_ID} from './constants.js';
@@ -110,9 +111,18 @@ export class Connection {
     this.#debug = options.debug ?? false;
     this.#handlers = options.handlers ?? [];
 
-    // Build handler lookup map
+    // Build handler lookup map and call connect() on handlers that support it
     for (const handler of this.#handlers) {
       this.#handlersByWireType.set(handler.wireType, handler);
+
+      // Call connect() if the handler supports messaging
+      if (typeof handler.connect === 'function') {
+        handler.connect({
+          sendMessage: (payload: unknown): void => {
+            this.#sendHandlerMessage(handler.wireType, payload);
+          },
+        });
+      }
     }
 
     // Set up finalization registry to notify remote when proxies are GC'd
@@ -124,6 +134,21 @@ export class Connection {
     // Bind and attach message handler
     this.#handleMessage = this.#onMessage.bind(this);
     endpoint.addEventListener('message', this.#handleMessage);
+  }
+
+  /**
+   * Send a handler message to the remote side.
+   */
+  #sendHandlerMessage(wireType: string, payload: unknown): void {
+    const transfers: Array<Transferable> = [];
+    this.#endpoint.postMessage(
+      {
+        type: 'handler-message',
+        wireType,
+        payload: this.#toWire(payload, '', transfers),
+      },
+      transfers,
+    );
   }
 
   /**
@@ -143,6 +168,13 @@ export class Connection {
    */
   close(): void {
     this.#endpoint.removeEventListener('message', this.#handleMessage);
+
+    // Call disconnect() on handlers that support it
+    for (const handler of this.#handlers) {
+      if (handler.disconnect) {
+        handler.disconnect();
+      }
+    }
   }
 
   /**
@@ -817,9 +849,33 @@ export class Connection {
       case 'call':
         await this.#handleCall(message);
         break;
+      case 'handler-message':
+        this.#handleHandlerMessage(message.wireType, message.payload);
+        break;
       default:
         // Exhaustiveness check
         message satisfies never;
+    }
+  }
+
+  /**
+   * Route a handler message to the appropriate handler.
+   */
+  #handleHandlerMessage(wireType: string, payload: WireValue): void {
+    const handler = this.#handlersByWireType.get(wireType);
+    if (handler?.onMessage) {
+      try {
+        const deserializedPayload = this.#fromWire(payload);
+        const ctx = this.#createFromWireContext();
+        handler.onMessage(deserializedPayload, ctx);
+      } catch (error) {
+        // Log errors from onMessage but don't propagate them
+        // (there's no good place to send them - these are spontaneous messages)
+        console.error(
+          `Error in handler.onMessage for wireType "${wireType}":`,
+          error,
+        );
+      }
     }
   }
 

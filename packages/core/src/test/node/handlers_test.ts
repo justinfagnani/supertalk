@@ -14,6 +14,7 @@ import {
   type Handler,
   type ToWireContext,
   type FromWireContext,
+  type HandlerConnectionContext,
 } from '../../index.js';
 import {streamHandler} from '../../handlers/streams.js';
 
@@ -621,5 +622,243 @@ void suite('Manual transfer() without handler', () => {
       transfer(stream) as unknown as ReadableStream<string>,
     );
     assert.deepStrictEqual(result, ['arg', 'transfer']);
+  });
+});
+
+void suite('Handler lifecycle', () => {
+  void test('connect() is called when handler is attached', async () => {
+    let connectCalled = false;
+    let receivedCtx: HandlerConnectionContext | undefined;
+
+    const lifecycleHandler: Handler<unknown, object> = {
+      wireType: 'test:lifecycle',
+      canHandle: (_value: unknown): _value is unknown => false,
+      toWire: (v) => v as object,
+      connect(ctx) {
+        connectCalled = true;
+        receivedCtx = ctx;
+      },
+    };
+
+    await using ctx = await setupService(
+      {echo: (x: string) => x},
+      {
+        handlers: [lifecycleHandler],
+      },
+    );
+
+    assert.strictEqual(connectCalled, true);
+    assert.ok(receivedCtx !== undefined);
+    assert.strictEqual(typeof receivedCtx.sendMessage, 'function');
+
+    // Verify service still works
+    const result = await ctx.remote.echo('hello');
+    assert.strictEqual(result, 'hello');
+  });
+
+  void test('disconnect() is called when connection closes', async () => {
+    let disconnectCount = 0;
+
+    const lifecycleHandler: Handler<unknown, object> = {
+      wireType: 'test:lifecycle',
+      canHandle: (_value: unknown): _value is unknown => false,
+      toWire: (v) => v as object,
+      disconnect() {
+        disconnectCount++;
+      },
+    };
+
+    const {port1, port2} = new MessageChannel();
+
+    const cleanup = expose({value: 42}, port1, {handlers: [lifecycleHandler]});
+    const remote = await wrap<{value: number}>(port2, {
+      handlers: [lifecycleHandler],
+    });
+
+    assert.strictEqual(await remote.value, 42);
+    assert.strictEqual(disconnectCount, 0);
+
+    // Call cleanup which calls connection.close()
+    cleanup();
+
+    // disconnect() should have been called on the expose side handler
+    assert.strictEqual(disconnectCount, 1);
+
+    port1.close();
+    port2.close();
+  });
+
+  void test('sendMessage() sends messages to remote handler', async () => {
+    const receivedMessages: Array<unknown> = [];
+    let senderCtx: HandlerConnectionContext | undefined;
+
+    const senderHandler: Handler<unknown, object> = {
+      wireType: 'test:messaging',
+      canHandle: (_value: unknown): _value is unknown => false,
+      toWire: (v) => v as object,
+      connect(ctx) {
+        senderCtx = ctx;
+      },
+    };
+
+    const receiverHandler: Handler<unknown, object> = {
+      wireType: 'test:messaging',
+      canHandle: (_value: unknown): _value is unknown => false,
+      toWire: (v) => v as object,
+      onMessage(payload) {
+        receivedMessages.push(payload);
+      },
+    };
+
+    const {port1, port2} = new MessageChannel();
+
+    expose({ping: () => 'pong'}, port1, {handlers: [senderHandler]});
+    await wrap<{ping: () => string}>(port2, {handlers: [receiverHandler]});
+
+    // Send a message from sender to receiver
+    assert.ok(senderCtx !== undefined);
+    senderCtx.sendMessage({type: 'test', data: 'hello'});
+
+    // Wait for message to propagate
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(receivedMessages.length, 1);
+    assert.deepStrictEqual(receivedMessages[0], {type: 'test', data: 'hello'});
+
+    port1.close();
+    port2.close();
+  });
+
+  void test('messages are serialized through toWire/fromWire', async () => {
+    const receivedMessages: Array<unknown> = [];
+    let senderCtx: HandlerConnectionContext | undefined;
+
+    // A handler that sends Maps in messages
+    const senderHandler: Handler<unknown, object> = {
+      wireType: 'test:serialized',
+      canHandle: (_value: unknown): _value is unknown => false,
+      toWire: (v) => v as object,
+      connect(ctx) {
+        senderCtx = ctx;
+      },
+    };
+
+    const receiverHandler: Handler<unknown, object> = {
+      wireType: 'test:serialized',
+      canHandle: (_value: unknown): _value is unknown => false,
+      toWire: (v) => v as object,
+      onMessage(payload) {
+        receivedMessages.push(payload);
+      },
+    };
+
+    const {port1, port2} = new MessageChannel();
+
+    // Include mapHandler so Maps are serialized properly
+    expose({}, port1, {handlers: [senderHandler, mapHandler]});
+    await wrap(port2, {handlers: [receiverHandler, mapHandler]});
+
+    // Send a message containing a Map
+    assert.ok(senderCtx !== undefined);
+    senderCtx.sendMessage({
+      items: new Map([
+        ['a', 1],
+        ['b', 2],
+      ]),
+    });
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(receivedMessages.length, 1);
+    const received = receivedMessages[0] as {items: Map<string, number>};
+    assert.ok(received.items instanceof Map);
+    assert.strictEqual(received.items.get('a'), 1);
+    assert.strictEqual(received.items.get('b'), 2);
+
+    port1.close();
+    port2.close();
+  });
+
+  void test('bidirectional handler messaging', async () => {
+    const port1Messages: Array<unknown> = [];
+    const port2Messages: Array<unknown> = [];
+    let port1Ctx: HandlerConnectionContext | undefined;
+    let port2Ctx: HandlerConnectionContext | undefined;
+
+    const port1Handler: Handler<unknown, object> = {
+      wireType: 'test:bidir',
+      canHandle: (_value: unknown): _value is unknown => false,
+      toWire: (v) => v as object,
+      connect(ctx) {
+        port1Ctx = ctx;
+      },
+      onMessage(payload) {
+        port1Messages.push(payload);
+      },
+    };
+
+    const port2Handler: Handler<unknown, object> = {
+      wireType: 'test:bidir',
+      canHandle: (_value: unknown): _value is unknown => false,
+      toWire: (v) => v as object,
+      connect(ctx) {
+        port2Ctx = ctx;
+      },
+      onMessage(payload) {
+        port2Messages.push(payload);
+      },
+    };
+
+    const {port1, port2} = new MessageChannel();
+
+    expose({}, port1, {handlers: [port1Handler]});
+    await wrap(port2, {handlers: [port2Handler]});
+
+    // Send from port1 to port2
+    assert.ok(port1Ctx !== undefined);
+    port1Ctx.sendMessage({from: 'port1'});
+
+    // Send from port2 to port1
+    assert.ok(port2Ctx !== undefined);
+    port2Ctx.sendMessage({from: 'port2'});
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(port2Messages.length, 1);
+    assert.deepStrictEqual(port2Messages[0], {from: 'port1'});
+
+    assert.strictEqual(port1Messages.length, 1);
+    assert.deepStrictEqual(port1Messages[0], {from: 'port2'});
+
+    port1.close();
+    port2.close();
+  });
+
+  void test('handler without lifecycle methods works normally', async () => {
+    // A minimal handler with no lifecycle methods
+    const minimalHandler: Handler<Set<unknown>, WireSet> = {
+      wireType: SET_WIRE_TYPE,
+      canHandle: (v): v is Set<unknown> => v instanceof Set,
+      toWire(set, ctx) {
+        return {
+          [WIRE_TYPE]: SET_WIRE_TYPE,
+          values: [...set].map((v) => ctx.toWire(v)),
+        };
+      },
+      fromWire(wire, ctx) {
+        return new Set(wire.values.map((v) => ctx.fromWire(v)));
+      },
+    };
+
+    await using ctx = await setupService(
+      {
+        getSet: () => new Set([1, 2, 3]),
+      },
+      {handlers: [minimalHandler]},
+    );
+
+    const result = await ctx.remote.getSet();
+    assert.ok(result instanceof Set);
+    assert.deepStrictEqual([...result], [1, 2, 3]);
   });
 });

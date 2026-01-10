@@ -13,7 +13,7 @@ import {fileURLToPath} from 'node:url';
 import {dirname, join} from 'node:path';
 import {wrap} from '@supertalk/core';
 import type {Endpoint} from '@supertalk/core';
-import {SignalManager, type RemoteSignal} from '../../index.js';
+import {SignalHandler, type RemoteSignal} from '../../index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKER_PATH = join(__dirname, 'signal-worker.js');
@@ -78,8 +78,8 @@ export interface MultiService {
 export interface WorkerContext<T> {
   /** The wrapped remote proxy */
   remote: T;
-  /** Signal manager for the main thread (receiver) side */
-  manager: SignalManager;
+  /** Signal handler for the main thread (receiver) side */
+  signalHandler: SignalHandler;
   /** The worker instance */
   worker: Worker;
   /** Dispose method for `using` declarations */
@@ -106,17 +106,16 @@ export async function createWorker(
   });
 
   const endpoint = workerToEndpoint(worker);
-  const manager = new SignalManager(endpoint);
+  const signalHandler = new SignalHandler();
   const remote = await wrap(endpoint, {
-    handlers: [manager.handler],
+    handlers: [signalHandler],
   });
 
   return {
     remote,
-    manager,
+    signalHandler,
     worker,
     [Symbol.dispose]() {
-      manager.dispose();
       void worker.terminate();
     },
   };

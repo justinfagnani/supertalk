@@ -1,7 +1,7 @@
 /**
- * @fileoverview SignalManager - Coordinates signal state between sender and receiver.
+ * @fileoverview SignalHandler - Coordinates signal state between sender and receiver.
  *
- * The SignalManager handles:
+ * The SignalHandler handles:
  * - Watching signals on the sender side
  * - Sending batch updates when signals change
  * - Receiving batch updates and dispatching to RemoteSignals
@@ -9,8 +9,8 @@
  * Usage:
  * ```ts
  * // Both sides
- * const manager = new SignalManager(endpoint);
- * const options = { handlers: [manager.handler] };
+ * const signalHandler = new SignalHandler();
+ * const options = { handlers: [signalHandler] };
  *
  * // Expose/wrap with the handler
  * expose(service, endpoint, options);
@@ -21,8 +21,8 @@
 import {Signal} from 'signal-polyfill';
 import {WIRE_TYPE} from '@supertalk/core';
 import type {
-  Endpoint,
   Handler,
+  HandlerConnectionContext,
   ToWireContext,
   FromWireContext,
   WireValue,
@@ -36,13 +36,20 @@ import {
 } from './types.js';
 
 /**
- * Manages signal synchronization across a connection.
+ * Handler for signal synchronization across a connection.
  *
- * Create one SignalManager per endpoint. Use `manager.handler` in your
- * handlers array for both expose() and wrap().
+ * Create one SignalHandler and include it in your handlers array for both
+ * expose() and wrap().
+ *
+ * Note: This handler is asymmetric - canHandle checks for Signal.State/Computed
+ * on the sender, but fromWire returns RemoteSignal on the receiver. We cast to
+ * work around the type system limitation.
  */
-export class SignalManager {
-  readonly #endpoint: Endpoint;
+export class SignalHandler implements Handler<AnySignal, WireSignal> {
+  readonly wireType = SIGNAL_WIRE_TYPE;
+
+  // Connection context provided by core
+  #ctx: HandlerConnectionContext | undefined;
 
   // Sender side: signals we've sent, indexed by ID
   #nextSignalId = 1;
@@ -59,66 +66,53 @@ export class SignalManager {
   #remoteSignals = new Map<number, WeakRef<RemoteSignal<unknown>>>();
   #remoteCleanup = new FinalizationRegistry((signalId: number) => {
     this.#remoteSignals.delete(signalId);
-    this.#endpoint.postMessage({type: 'signal:release', signalId});
+    // Send release message through handler messaging
+    this.#ctx?.sendMessage({type: 'signal:release', signalId});
   });
 
   /**
-   * The handler to use with expose() and wrap().
-   *
-   * Note: The handler type is `Handler<AnySignal, WireSignal>` which means
-   * canHandle accepts AnySignal. However, fromWire returns RemoteSignal which
-   * is not an AnySignal. This is intentional - the sender sends signals,
-   * the receiver gets RemoteSignals. We cast to work around the type system.
+   * Called by core when the connection is established.
    */
-  readonly handler: Handler<AnySignal, WireSignal>;
-
-  constructor(endpoint: Endpoint) {
-    this.#endpoint = endpoint;
-
-    // Set up message listener for batch updates
-    //
-    // The Supertalk Handler interface only provides toWire/fromWire for value
-    // transformation during RPC calls. But signals need spontaneous push
-    // updates when values change outside of any RPC call. This is similar to
-    // how core handles promise-resolve/promise-reject, except signals update
-    // many times. Until core has a generalized subscription mechanism, we
-    // maintain our own message protocol for signal:batch updates.
-    endpoint.addEventListener('message', this.#onMessage);
-
-    // Create the handler
-    // We use `as Handler<AnySignal, WireSignal>` because the handler is
-    // asymmetric: canHandle checks for Signal.State/Computed on sender,
-    // but fromWire returns RemoteSignal on receiver.
-    this.handler = {
-      wireType: SIGNAL_WIRE_TYPE,
-
-      canHandle: (value: unknown): value is AnySignal => {
-        return (
-          value instanceof Signal.State || value instanceof Signal.Computed
-        );
-      },
-
-      toWire: (signal: AnySignal, ctx: ToWireContext): WireSignal => {
-        return this.#sendSignal(signal, ctx);
-      },
-
-      fromWire: (wire: WireSignal, ctx: FromWireContext): unknown => {
-        return this.#receiveSignal(wire, ctx);
-      },
-    } as Handler<AnySignal, WireSignal>;
+  connect(ctx: HandlerConnectionContext): void {
+    this.#ctx = ctx;
   }
 
   /**
-   * Clean up resources.
+   * Called by core when a handler message is received.
    */
-  dispose(): void {
-    this.#endpoint.removeEventListener('message', this.#onMessage);
+  onMessage(payload: unknown): void {
+    if (isSignalBatchUpdate(payload)) {
+      this.#handleBatchUpdate(payload);
+    } else if (isSignalReleaseMessage(payload)) {
+      this.releaseSignal(payload.signalId);
+    }
+  }
+
+  /**
+   * Called by core when the connection is closed.
+   */
+  disconnect(): void {
+    this.#ctx = undefined;
     if (this.#watcher !== undefined) {
       this.#watcher.unwatch(...this.#signalWrappers.values());
     }
     this.#sentSignals.clear();
     this.#signalWrappers.clear();
     this.#remoteSignals.clear();
+  }
+
+  canHandle(value: unknown): value is AnySignal {
+    return value instanceof Signal.State || value instanceof Signal.Computed;
+  }
+
+  toWire(signal: AnySignal, ctx: ToWireContext): WireSignal {
+    return this.#sendSignal(signal, ctx);
+  }
+
+  // Return type is `unknown` because on the receiver side we return RemoteSignal,
+  // not AnySignal. The Handler<T,W> type expects T but this handler is asymmetric.
+  fromWire(wire: WireSignal, ctx: FromWireContext): AnySignal {
+    return this.#receiveSignal(wire, ctx) as unknown as AnySignal;
   }
 
   /**
@@ -201,7 +195,7 @@ export class SignalManager {
   #flush = (): void => {
     this.#flushScheduled = false;
 
-    if (this.#watcher === undefined) {
+    if (this.#watcher === undefined || this.#ctx === undefined) {
       return;
     }
 
@@ -235,19 +229,7 @@ export class SignalManager {
         type: 'signal:batch',
         updates,
       };
-      this.#endpoint.postMessage(message);
-    }
-  };
-
-  /**
-   * Handle incoming messages.
-   */
-  #onMessage = (event: MessageEvent): void => {
-    const data = event.data as unknown;
-    if (isSignalBatchUpdate(data)) {
-      this.#handleBatchUpdate(data);
-    } else if (isSignalReleaseMessage(data)) {
-      this.releaseSignal(data.signalId);
+      this.#ctx.sendMessage(message);
     }
   };
 

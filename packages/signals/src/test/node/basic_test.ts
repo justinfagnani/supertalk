@@ -297,7 +297,7 @@ void suite('@supertalk/signals', () => {
       await ctx.remote.count;
 
       // Sender should only be tracking one signal
-      assert.strictEqual(ctx.senderManager._sentSignalCount, 1);
+      assert.strictEqual(ctx.senderHandler._sentSignalCount, 1);
     });
   });
 
@@ -314,15 +314,15 @@ void suite('@supertalk/signals', () => {
       await ctx.remote.count;
 
       // Sender should be tracking the signal
-      assert.strictEqual(ctx.senderManager._sentSignalCount, 1);
-      assert.strictEqual(ctx.senderManager._isWatching(1), true);
+      assert.strictEqual(ctx.senderHandler._sentSignalCount, 1);
+      assert.strictEqual(ctx.senderHandler._isWatching(1), true);
 
       // Manually trigger release (simulating what happens when RemoteSignal is GC'd)
-      ctx.senderManager.releaseSignal(1);
+      ctx.senderHandler.releaseSignal(1);
 
       // Sender should no longer be tracking the signal
-      assert.strictEqual(ctx.senderManager._sentSignalCount, 0);
-      assert.strictEqual(ctx.senderManager._isWatching(1), false);
+      assert.strictEqual(ctx.senderHandler._sentSignalCount, 0);
+      assert.strictEqual(ctx.senderHandler._isWatching(1), false);
     });
 
     void test('signal:release message triggers cleanup on sender', async () => {
@@ -337,16 +337,14 @@ void suite('@supertalk/signals', () => {
       await ctx.remote.count;
 
       // Sender should be tracking the signal
-      assert.strictEqual(ctx.senderManager._sentSignalCount, 1);
+      assert.strictEqual(ctx.senderHandler._sentSignalCount, 1);
 
-      // Simulate the receiver sending a release message (normally triggered by GC)
-      ctx.port2.postMessage({type: 'signal:release', signalId: 1});
-
-      // Wait for message to be processed
-      await waitForMessages();
+      // Simulate the receiver sending a release message
+      // (normally triggered by FinalizationRegistry when RemoteSignal is GC'd)
+      ctx.senderHandler.onMessage({type: 'signal:release', signalId: 1});
 
       // Sender should no longer be tracking the signal
-      assert.strictEqual(ctx.senderManager._sentSignalCount, 0);
+      assert.strictEqual(ctx.senderHandler._sentSignalCount, 0);
     });
 
     void test('updates stop after signal is released', async () => {
@@ -368,7 +366,7 @@ void suite('@supertalk/signals', () => {
       assert.strictEqual(remoteCount.get(), 1);
 
       // Release the signal
-      ctx.senderManager.releaseSignal(1);
+      ctx.senderHandler.releaseSignal(1);
 
       // Update after release - value should not change on remote
       count.set(999);
@@ -390,7 +388,7 @@ void suite('@supertalk/signals', () => {
       await ctx.remote.count;
 
       // Receiver should be tracking the remote signal
-      assert.strictEqual(ctx.receiverManager._remoteSignalCount, 1);
+      assert.strictEqual(ctx.receiverHandler._remoteSignalCount, 1);
     });
   });
 

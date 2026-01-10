@@ -258,8 +258,51 @@ expose(service, self, {handlers: [streamHandler]});
 const remote = await wrap<typeof service>(worker, {handlers: [streamHandler]});
 ```
 
-**Custom Handlers:** You can create handlers for types like `Map`, `Set`, or
-domain objects. See `Handler`, `ToWireContext`, and `FromWireContext` types.
+**Custom Handlers:**
+
+Handlers let you control how specific types are serialized. Each handler implements:
+
+- `wireType` — Unique identifier (e.g., `'app:my-type'`)
+- `canHandle(value)` — Returns `true` if this handler should process the value
+- `toWire(value, ctx)` — Serialize the value, using `ctx.toWire()` for nested values
+- `fromWire(wire, ctx)` — Deserialize, using `ctx.fromWire()` for nested values
+
+```ts
+import {WIRE_TYPE, type Handler} from '@supertalk/core';
+
+// Handler that clones Maps by converting to/from arrays
+const mapHandler: Handler<Map<unknown, unknown>, {entries: unknown[]}> = {
+  wireType: 'app:map',
+
+  canHandle: (v): v is Map<unknown, unknown> => v instanceof Map,
+
+  toWire(map, ctx) {
+    return {
+      [WIRE_TYPE]: 'app:map',
+      entries: [...map.entries()].map(([k, v]) => [
+        ctx.toWire(k),
+        ctx.toWire(v),
+      ]),
+    };
+  },
+
+  fromWire(wire, ctx) {
+    return new Map(
+      wire.entries.map(([k, v]) => [ctx.fromWire(k), ctx.fromWire(v)]),
+    );
+  },
+};
+```
+
+**Subscription Handlers:**
+
+For handlers that need to send updates outside of RPC calls (like signals or observables), the handler lifecycle provides messaging support:
+
+- `connect(ctx)` — Called when attached; provides `ctx.sendMessage()` for sending updates
+- `onMessage(payload)` — Called when a message arrives for this handler's wireType
+- `disconnect()` — Called when the connection closes; clean up resources
+
+See [@supertalk/signals](../signals) for a complete example.
 
 ### TypeScript Types
 

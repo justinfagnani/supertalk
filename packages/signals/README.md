@@ -27,7 +27,7 @@ npm install @supertalk/signals signal-polyfill
 ```ts
 import {expose} from '@supertalk/core';
 import {Signal} from 'signal-polyfill';
-import {SignalManager} from '@supertalk/signals';
+import {SignalHandler} from '@supertalk/signals';
 
 const count = new Signal.State(0);
 const doubled = new Signal.Computed(() => count.get() * 2);
@@ -38,8 +38,7 @@ const service = {
   increment: () => count.set(count.get() + 1),
 };
 
-const manager = new SignalManager(self);
-expose(service, self, {handlers: [manager.handler]});
+expose(service, self, {handlers: [new SignalHandler()]});
 ```
 
 **main.ts** (wrapped side):
@@ -47,12 +46,11 @@ expose(service, self, {handlers: [manager.handler]});
 ```ts
 import {wrap} from '@supertalk/core';
 import {Signal} from 'signal-polyfill';
-import {SignalManager} from '@supertalk/signals';
+import {SignalHandler} from '@supertalk/signals';
 
 const worker = new Worker('./worker.ts');
-const manager = new SignalManager(worker);
 const remote = await wrap<typeof service>(worker, {
-  handlers: [manager.handler],
+  handlers: [new SignalHandler()],
 });
 
 // Get the remote signal (initial value available synchronously)
@@ -72,19 +70,16 @@ console.log(quadrupled.get()); // 4
 
 ## API
 
-### `SignalManager`
+### `SignalHandler`
 
 Coordinates signal synchronization across a connection. Create one per endpoint.
 
 ```ts
-const manager = new SignalManager(endpoint);
+// Sending side
+expose(service, endpoint, {handlers: [new SignalHandler(endpoint)]});
 
-// Use manager.handler in your handlers array
-expose(service, endpoint, {handlers: [manager.handler]});
-const remote = await wrap(endpoint, {handlers: [manager.handler]});
-
-// Clean up when done
-manager.dispose();
+// Receiving side
+const remote = await wrap(endpoint, {handlers: [new SignalHandler(endpoint)]});
 ```
 
 ### `RemoteSignal<T>`
@@ -118,7 +113,7 @@ watcher.watch(new Signal.Computed(() => count.get()));
 ## How It Works
 
 1. When a `Signal.State` or `Signal.Computed` is sent across the boundary, the
-   `SignalManager` assigns it an ID and sends the current value
+   `SignalHandler` assigns it an ID and sends the current value
 2. The receiver creates a `RemoteSignal` with that initial value
 3. On the sender side, a `Watcher` monitors all sent signals for changes
 4. When signals change, updates are batched via `queueMicrotask` and sent as a
@@ -130,5 +125,5 @@ watcher.watch(new Signal.Computed(() => count.get()));
 
 - **One-way sync:** Signals flow from sender to receiver. `RemoteSignal`s are
   read-only.
-- **Requires handler on both sides:** Both `expose()` and `wrap()` need the
-  `manager.handler` in their handlers array.
+- **Requires handler on both sides:** Both `expose()` and `wrap()` need a
+  `SignalHandler` in their handlers array.
