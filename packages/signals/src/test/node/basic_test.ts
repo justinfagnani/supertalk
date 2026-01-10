@@ -142,14 +142,17 @@ void suite('@supertalk/signals', () => {
     void test('updates propagate to receiver', async () => {
       const count = new Signal.State(0);
 
-      using ctx = await setupSignalService({
-        get count() {
-          return count;
+      using ctx = await setupSignalService(
+        {
+          get count() {
+            return count;
+          },
+          increment() {
+            count.set(count.get() + 1);
+          },
         },
-        increment() {
-          count.set(count.get() + 1);
-        },
-      });
+        {signalHandlerOptions: {autoWatch: true}},
+      );
 
       const remoteCount = await ctx.remote.count;
       assert.strictEqual(remoteCount.get(), 0);
@@ -167,18 +170,21 @@ void suite('@supertalk/signals', () => {
       const a = new Signal.State(0);
       const b = new Signal.State(0);
 
-      using ctx = await setupSignalService({
-        get a() {
-          return a;
+      using ctx = await setupSignalService(
+        {
+          get a() {
+            return a;
+          },
+          get b() {
+            return b;
+          },
+          updateBoth() {
+            a.set(1);
+            b.set(2);
+          },
         },
-        get b() {
-          return b;
-        },
-        updateBoth() {
-          a.set(1);
-          b.set(2);
-        },
-      });
+        {signalHandlerOptions: {autoWatch: true}},
+      );
 
       const [remoteA, remoteB] = await Promise.all([
         ctx.remote.a,
@@ -202,17 +208,20 @@ void suite('@supertalk/signals', () => {
       const count = new Signal.State(5);
       const doubled = new Signal.Computed(() => count.get() * 2);
 
-      using ctx = await setupSignalService({
-        get count() {
-          return count;
+      using ctx = await setupSignalService(
+        {
+          get count() {
+            return count;
+          },
+          get doubled() {
+            return doubled;
+          },
+          setCount(n: number) {
+            count.set(n);
+          },
         },
-        get doubled() {
-          return doubled;
-        },
-        setCount(n: number) {
-          count.set(n);
-        },
-      });
+        {signalHandlerOptions: {autoWatch: true}},
+      );
 
       const [remoteCount, remoteDoubled] = await Promise.all([
         ctx.remote.count,
@@ -237,14 +246,17 @@ void suite('@supertalk/signals', () => {
     void test('RemoteSignal works with Signal.Computed', async () => {
       const count = new Signal.State(5);
 
-      using ctx = await setupSignalService({
-        get count() {
-          return count;
+      using ctx = await setupSignalService(
+        {
+          get count() {
+            return count;
+          },
+          setCount(n: number) {
+            count.set(n);
+          },
         },
-        setCount(n: number) {
-          count.set(n);
-        },
-      });
+        {signalHandlerOptions: {autoWatch: true}},
+      );
 
       // Note: The handler transforms Signal.State → RemoteSignal at runtime,
       // but RemoteProxy<T> type doesn't know about this transformation.
@@ -305,11 +317,14 @@ void suite('@supertalk/signals', () => {
     void test('releaseSignal removes signal from sender tracking', async () => {
       const count = new Signal.State(0);
 
-      using ctx = await setupSignalService({
-        get count() {
-          return count;
+      using ctx = await setupSignalService(
+        {
+          get count() {
+            return count;
+          },
         },
-      });
+        {signalHandlerOptions: {autoWatch: true}},
+      );
 
       await ctx.remote.count;
 
@@ -328,11 +343,14 @@ void suite('@supertalk/signals', () => {
     void test('signal:release message triggers cleanup on sender', async () => {
       const count = new Signal.State(0);
 
-      using ctx = await setupSignalService({
-        get count() {
-          return count;
+      using ctx = await setupSignalService(
+        {
+          get count() {
+            return count;
+          },
         },
-      });
+        {signalHandlerOptions: {autoWatch: true}},
+      );
 
       await ctx.remote.count;
 
@@ -350,11 +368,14 @@ void suite('@supertalk/signals', () => {
     void test('updates stop after signal is released', async () => {
       const count = new Signal.State(0);
 
-      using ctx = await setupSignalService({
-        get count() {
-          return count;
+      using ctx = await setupSignalService(
+        {
+          get count() {
+            return count;
+          },
         },
-      });
+        {signalHandlerOptions: {autoWatch: true}},
+      );
 
       const remoteCount = (await ctx.remote
         .count) as unknown as RemoteSignal<number>;
@@ -405,7 +426,7 @@ void suite('@supertalk/signals', () => {
             return data;
           },
         },
-        {nestedProxies: true},
+        {nestedProxies: true, signalHandlerOptions: {autoWatch: true}},
       );
 
       const remoteData = (await ctx.remote.data) as unknown as RemoteSignal<{
@@ -444,7 +465,7 @@ void suite('@supertalk/signals', () => {
             });
           },
         },
-        {nestedProxies: true},
+        {nestedProxies: true, signalHandlerOptions: {autoWatch: true}},
       );
 
       const remoteData = (await ctx.remote.data) as unknown as RemoteSignal<{
@@ -473,7 +494,7 @@ void suite('@supertalk/signals', () => {
             return handlers;
           },
         },
-        {nestedProxies: true},
+        {nestedProxies: true, signalHandlerOptions: {autoWatch: true}},
       );
 
       const remoteHandlers = (await ctx.remote
@@ -483,6 +504,215 @@ void suite('@supertalk/signals', () => {
       assert.strictEqual(arr.length, 2);
       assert.strictEqual(await arr[0]!(), 'first');
       assert.strictEqual(await arr[1]!(), 'second');
+    });
+  });
+
+  void suite('Lazy watching (default)', () => {
+    void test('sender does not watch signal immediately when sent', async () => {
+      const count = new Signal.State(0);
+
+      using ctx = await setupSignalService({
+        get count() {
+          return count;
+        },
+      });
+
+      await ctx.remote.count;
+
+      // Sender should have the signal registered but NOT watching
+      assert.strictEqual(ctx.senderHandler._sentSignalCount, 1);
+      assert.strictEqual(ctx.senderHandler._isWatching(1), false);
+    });
+
+    void test('[Signal.subtle.watched] on source is NOT called just because signal was sent', async () => {
+      let watchedCalled = false;
+
+      const count = new Signal.State(0, {
+        [Signal.subtle.watched]: () => {
+          watchedCalled = true;
+        },
+      });
+
+      using ctx = await setupSignalService({
+        get count() {
+          return count;
+        },
+      });
+
+      // Send the signal by accessing it
+      await ctx.remote.count;
+      await waitForMessages();
+
+      // The watched callback should NOT have been called
+      assert.strictEqual(watchedCalled, false);
+    });
+
+    void test('creating a Computed that reads RemoteSignal does NOT trigger watched', async () => {
+      // This test verifies that our implementation matches TC39 Signals behavior:
+      // a signal is only "watched" when there's an actual Watcher in the chain,
+      // not just because a Computed reads from it.
+      let watchedCalled = false;
+
+      const count = new Signal.State(0, {
+        [Signal.subtle.watched]: () => {
+          watchedCalled = true;
+        },
+      });
+
+      using ctx = await setupSignalService({
+        get count() {
+          return count;
+        },
+      });
+
+      const remoteCount = (await ctx.remote
+        .count) as unknown as RemoteSignal<number>;
+
+      // Create a Computed that reads the remote signal (but don't watch it)
+      const doubled = new Signal.Computed(() => remoteCount.get() * 2);
+
+      // Read the computed
+      assert.strictEqual(doubled.get(), 0);
+
+      await waitForMessages();
+
+      // The watched callback should NOT have been called - no Watcher in the chain
+      assert.strictEqual(watchedCalled, false);
+    });
+
+    void test('[Signal.subtle.watched] fires when receiver observes reactively', async () => {
+      let watchedCalled = false;
+
+      const count = new Signal.State(0, {
+        [Signal.subtle.watched]: () => {
+          watchedCalled = true;
+        },
+      });
+
+      using ctx = await setupSignalService({
+        get count() {
+          return count;
+        },
+      });
+
+      const remoteCount = await ctx.remote.count;
+
+      // Not watched yet
+      assert.strictEqual(watchedCalled, false);
+
+      // Create a watcher that observes the remote signal
+      const watcher = new Signal.subtle.Watcher(() => {});
+      const computed = new Signal.Computed(() => remoteCount.get());
+      watcher.watch(computed);
+      computed.get(); // Establish subscription
+
+      // Wait for watch message to propagate
+      await waitForMessages();
+
+      // Now the watched callback should have fired
+      assert.strictEqual(watchedCalled, true);
+
+      // Clean up
+      watcher.unwatch(computed);
+    });
+
+    void test('[Signal.subtle.unwatched] fires when receiver stops observing', async () => {
+      let unwatchedCalled = false;
+
+      const count = new Signal.State(0, {
+        [Signal.subtle.unwatched]: () => {
+          unwatchedCalled = true;
+        },
+      });
+
+      using ctx = await setupSignalService({
+        get count() {
+          return count;
+        },
+      });
+
+      const remoteCount = await ctx.remote.count;
+
+      // Create a watcher that observes the remote signal
+      const watcher = new Signal.subtle.Watcher(() => {});
+      const computed = new Signal.Computed(() => remoteCount.get());
+      watcher.watch(computed);
+      computed.get(); // Establish subscription
+
+      await waitForMessages();
+      assert.strictEqual(unwatchedCalled, false);
+
+      // Stop watching
+      watcher.unwatch(computed);
+
+      // Wait for unwatch message to propagate
+      await waitForMessages();
+
+      // Now the unwatched callback should have fired
+      assert.strictEqual(unwatchedCalled, true);
+    });
+
+    void test('updates only flow when receiver is watching reactively', async () => {
+      const count = new Signal.State(0);
+
+      using ctx = await setupSignalService({
+        get count() {
+          return count;
+        },
+        increment() {
+          count.set(count.get() + 1);
+        },
+      });
+
+      const remoteCount = (await ctx.remote
+        .count) as unknown as RemoteSignal<number>;
+      assert.strictEqual(remoteCount.get(), 0);
+
+      // Update without watching - value should NOT propagate
+      await ctx.remote.increment();
+      await waitForMessages();
+      assert.strictEqual(remoteCount.get(), 0); // Still 0!
+
+      // Now start watching reactively
+      const watcher = new Signal.subtle.Watcher(() => {});
+      const computed = new Signal.Computed(() => remoteCount.get());
+      watcher.watch(computed);
+      computed.get();
+
+      await waitForMessages();
+
+      // Update again - now it should propagate
+      await ctx.remote.increment();
+      await waitForMessages();
+      assert.strictEqual(remoteCount.get(), 2); // Now updated
+
+      watcher.unwatch(computed);
+    });
+
+    void test('autoWatch: true calls [Signal.subtle.watched] immediately', async () => {
+      let watchedCalled = false;
+
+      const count = new Signal.State(0, {
+        [Signal.subtle.watched]: () => {
+          watchedCalled = true;
+        },
+      });
+
+      // Using explicit autoWatch: true
+      using ctx = await setupSignalService(
+        {
+          get count() {
+            return count;
+          },
+        },
+        {signalHandlerOptions: {autoWatch: true}},
+      );
+
+      await ctx.remote.count;
+      await waitForMessages();
+
+      // With autoWatch: true, watched callback SHOULD be called
+      assert.strictEqual(watchedCalled, true);
     });
   });
 });

@@ -2,9 +2,14 @@
  * @fileoverview SignalHandler - Coordinates signal state between sender and receiver.
  *
  * The SignalHandler handles:
- * - Watching signals on the sender side
- * - Sending batch updates when signals change
+ * - Tracking signals on the sender side (watching only when receiver requests)
+ * - Sending batch updates when watched signals change
  * - Receiving batch updates and dispatching to RemoteSignals
+ *
+ * Lazy watching: Signals are NOT watched immediately when sent. Instead, the
+ * receiver's RemoteSignal sends a watch message when something observes it.
+ * This ensures that signals with [Signal.subtle.watched] callbacks on the
+ * sender side don't start their work until the receiver actually observes them.
  *
  * Usage:
  * ```ts
@@ -32,8 +37,34 @@ import type {AnySignal, WireSignal, SignalBatchUpdate} from './types.js';
 import {
   isSignalBatchUpdate,
   isSignalReleaseMessage,
+  isSignalWatchMessage,
+  isSignalUnwatchMessage,
   SIGNAL_WIRE_TYPE,
 } from './types.js';
+
+/**
+ * Options for SignalHandler.
+ */
+export interface SignalHandlerOptions {
+  /**
+   * Whether to automatically watch signals when they are sent.
+   *
+   * - `false` (default): Signals are only watched when the receiver observes
+   *   them reactively (via effect, computed, or watcher). The source signal's
+   *   `[Signal.subtle.watched]` callback only fires when something on the
+   *   receiver side actually observes the RemoteSignal. Non-reactive `.get()`
+   *   calls will return stale values after the initial transfer.
+   *
+   * - `true`: Signals are watched immediately when sent. Updates always flow
+   *   to the receiver. The source signal's `[Signal.subtle.watched]` callback
+   *   fires immediately when the signal is sent. Non-reactive `.get()`
+   *   calls will return the latest values after the initial transfer.
+   *
+   * Use `true` when you always want updates to flow, regardless of whether
+   * the receiver is observing reactively.
+   */
+  autoWatch?: boolean;
+}
 
 /**
  * Handler for signal synchronization across a connection.
@@ -47,6 +78,9 @@ import {
  */
 export class SignalHandler implements Handler<AnySignal, WireSignal> {
   readonly wireType = SIGNAL_WIRE_TYPE;
+
+  // Configuration
+  readonly #autoWatch: boolean;
 
   // Connection context provided by core
   #ctx: HandlerConnectionContext | undefined;
@@ -70,6 +104,10 @@ export class SignalHandler implements Handler<AnySignal, WireSignal> {
     this.#ctx?.sendMessage({type: 'signal:release', signalId});
   });
 
+  constructor(options: SignalHandlerOptions = {}) {
+    this.#autoWatch = options.autoWatch ?? false;
+  }
+
   /**
    * Called by core when the connection is established.
    */
@@ -85,6 +123,10 @@ export class SignalHandler implements Handler<AnySignal, WireSignal> {
       this.#handleBatchUpdate(payload);
     } else if (isSignalReleaseMessage(payload)) {
       this.releaseSignal(payload.signalId);
+    } else if (isSignalWatchMessage(payload)) {
+      this.#startWatching(payload.signalId);
+    } else if (isSignalUnwatchMessage(payload)) {
+      this.#stopWatching(payload.signalId);
     }
   }
 
@@ -117,6 +159,10 @@ export class SignalHandler implements Handler<AnySignal, WireSignal> {
 
   /**
    * Handle sending a signal (sender side).
+   *
+   * If autoWatch is true, we start watching immediately so updates always flow.
+   * If autoWatch is false, watching is lazy - it only starts when the receiver
+   * sends a watch message (triggered by something observing the RemoteSignal).
    */
   #sendSignal(signal: AnySignal, ctx: ToWireContext): WireSignal {
     // Check if we've already sent this signal
@@ -127,19 +173,10 @@ export class SignalHandler implements Handler<AnySignal, WireSignal> {
       this.#sentSignals.set(signalId, signal);
       this.#signalToId.set(signal, signalId);
 
-      // Wrap in a private Computed for reliable change detection.
-      //
-      // getPending() returns Computeds that are invalidated but not yet read.
-      // If we watched the user's signal directly and someone else read it before
-      // our flush, it would no longer be pending. By wrapping in our own Computed
-      // that only we read, we have a private "dirty" flag that stays set until
-      // we explicitly read it in #flush.
-      const watcher = this.#ensureWatcher();
-      const wrapper = new Signal.Computed(() => signal.get());
-      this.#signalWrappers.set(signalId, wrapper);
-      watcher.watch(wrapper);
-      // Read the wrapper to establish the subscription
-      wrapper.get();
+      // If autoWatch is enabled, start watching immediately
+      if (this.#autoWatch) {
+        this.#startWatching(signalId);
+      }
     }
 
     // Serialize the current value
@@ -169,11 +206,78 @@ export class SignalHandler implements Handler<AnySignal, WireSignal> {
     // Deserialize the initial value through the context to handle nested proxies
     const initialValue = ctx.fromWire(wire.value as WireValue);
 
-    // Create new RemoteSignal with initial value
-    const remote = new RemoteSignal(wire.signalId, initialValue);
+    // Create new RemoteSignal with initial value and watch state callback
+    const remote = new RemoteSignal(
+      wire.signalId,
+      initialValue,
+      this.#onRemoteWatchStateChange,
+    );
     this.#remoteSignals.set(wire.signalId, new WeakRef(remote));
     this.#remoteCleanup.register(remote, wire.signalId);
     return remote;
+  }
+
+  /**
+   * Callback for when a RemoteSignal's watch state changes.
+   * Sends watch/unwatch messages to the sender.
+   */
+  #onRemoteWatchStateChange = (signalId: number, watching: boolean): void => {
+    if (this.#ctx === undefined) return;
+
+    if (watching) {
+      this.#ctx.sendMessage({type: 'signal:watch', signalId});
+    } else {
+      this.#ctx.sendMessage({type: 'signal:unwatch', signalId});
+    }
+  };
+
+  /**
+   * Start watching a signal (sender side, triggered by receiver watch message).
+   *
+   * Creates a Computed wrapper for reliable change detection and starts
+   * watching it. This is when the source signal's [Signal.subtle.watched]
+   * callback will fire (if it has one).
+   */
+  #startWatching(signalId: number): void {
+    // Check if already watching
+    if (this.#signalWrappers.has(signalId)) {
+      return;
+    }
+
+    const signal = this.#sentSignals.get(signalId);
+    if (signal === undefined) {
+      return;
+    }
+
+    // Wrap in a private Computed for reliable change detection.
+    //
+    // getPending() returns Computeds that are invalidated but not yet read.
+    // If we watched the user's signal directly and someone else read it before
+    // our flush, it would no longer be pending. By wrapping in our own Computed
+    // that only we read, we have a private "dirty" flag that stays set until
+    // we explicitly read it in #flush.
+    const watcher = this.#ensureWatcher();
+    const wrapper = new Signal.Computed(() => signal.get());
+    this.#signalWrappers.set(signalId, wrapper);
+    watcher.watch(wrapper);
+    // Read the wrapper to establish the subscription
+    wrapper.get();
+  }
+
+  /**
+   * Stop watching a signal (sender side, triggered by receiver unwatch message).
+   *
+   * Removes the Computed wrapper and stops watching. This is when the source
+   * signal's [Signal.subtle.unwatched] callback will fire (if it has one).
+   */
+  #stopWatching(signalId: number): void {
+    const wrapper = this.#signalWrappers.get(signalId);
+    if (wrapper === undefined) {
+      return;
+    }
+
+    this.#watcher?.unwatch(wrapper);
+    this.#signalWrappers.delete(signalId);
   }
 
   /**

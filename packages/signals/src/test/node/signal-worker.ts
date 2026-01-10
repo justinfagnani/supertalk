@@ -10,17 +10,21 @@ import {parentPort, workerData} from 'node:worker_threads';
 import {expose} from '@supertalk/core';
 import {Signal} from 'signal-polyfill';
 import {SignalHandler} from '../../index.js';
+import type {SignalHandlerOptions} from '../../index.js';
 
 if (!parentPort) {
   throw new Error('This file must be run as a worker');
 }
 
-// Create signal handler for this worker
-const signalHandler = new SignalHandler();
+// Get options from workerData
+const data = workerData as
+  | {serviceType?: string; signalHandlerOptions?: SignalHandlerOptions}
+  | undefined;
+const serviceType = data?.serviceType;
+const signalHandlerOptions = data?.signalHandlerOptions;
 
-// Get the service type from workerData
-const serviceType = (workerData as {serviceType?: string} | undefined)
-  ?.serviceType;
+// Create signal handler for this worker
+const signalHandler = new SignalHandler(signalHandlerOptions);
 
 // Create the appropriate service based on type
 let service: object;

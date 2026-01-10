@@ -15,6 +15,7 @@ import {MessageChannel, type MessagePort} from 'node:worker_threads';
 import {expose, wrap} from '@supertalk/core';
 import type {Remote, Options} from '@supertalk/core';
 import {SignalHandler} from '../../index.js';
+import type {SignalHandlerOptions} from '../../index.js';
 
 /**
  * A disposable test context that sets up a service and remote proxy with signal support.
@@ -34,6 +35,14 @@ export interface SignalServiceContext<R> {
 }
 
 /**
+ * Options for setupSignalService.
+ */
+export interface SetupSignalServiceOptions extends Omit<Options, 'handlers'> {
+  /** Options to pass to SignalHandler on both sides */
+  signalHandlerOptions?: SignalHandlerOptions;
+}
+
+/**
  * Set up a service with signal support and return a remote proxy for testing.
  * Use with `await using` to automatically close ports when the scope ends.
  *
@@ -48,24 +57,25 @@ export interface SignalServiceContext<R> {
  */
 export async function setupSignalService<T extends object>(
   service: T,
-  options: Omit<Options, 'handlers'> = {},
+  options: SetupSignalServiceOptions = {},
 ): Promise<SignalServiceContext<Remote<T>>> {
   const {port1, port2} = new MessageChannel();
+  const {signalHandlerOptions, ...coreOptions} = options;
 
   // Create signal handlers for both sides
-  const senderHandler = new SignalHandler();
-  const receiverHandler = new SignalHandler();
+  const senderHandler = new SignalHandler(signalHandlerOptions);
+  const receiverHandler = new SignalHandler(signalHandlerOptions);
 
   // Expose with signal handler
   expose(service, port1, {
-    ...options,
-    handlers: [senderHandler, ...((options as Options).handlers ?? [])],
+    ...coreOptions,
+    handlers: [senderHandler, ...((coreOptions as Options).handlers ?? [])],
   });
 
   // Wrap with signal handler
   const remote = await wrap<T>(port2, {
-    ...options,
-    handlers: [receiverHandler, ...((options as Options).handlers ?? [])],
+    ...coreOptions,
+    handlers: [receiverHandler, ...((coreOptions as Options).handlers ?? [])],
   });
 
   return {

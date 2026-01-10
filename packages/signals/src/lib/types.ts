@@ -86,3 +86,45 @@ export function isSignalReleaseMessage(
   const type = (message as Record<string, unknown>)['type'];
   return type === 'signal:release';
 }
+
+/**
+ * Watch message sent from receiver to sender when a RemoteSignal is watched.
+ */
+export interface SignalWatchMessage {
+  readonly type: 'signal:watch';
+  readonly signalId: number;
+}
+
+/**
+ * Check if a message is a SignalWatchMessage.
+ */
+export function isSignalWatchMessage(
+  message: unknown,
+): message is SignalWatchMessage {
+  if (message === null || typeof message !== 'object' || !('type' in message)) {
+    return false;
+  }
+  const type = (message as Record<string, unknown>)['type'];
+  return type === 'signal:watch';
+}
+
+/**
+ * Unwatch message sent from receiver to sender when a RemoteSignal is unwatched.
+ */
+export interface SignalUnwatchMessage {
+  readonly type: 'signal:unwatch';
+  readonly signalId: number;
+}
+
+/**
+ * Check if a message is a SignalUnwatchMessage.
+ */
+export function isSignalUnwatchMessage(
+  message: unknown,
+): message is SignalUnwatchMessage {
+  if (message === null || typeof message !== 'object' || !('type' in message)) {
+    return false;
+  }
+  const type = (message as Record<string, unknown>)['type'];
+  return type === 'signal:unwatch';
+}

@@ -35,6 +35,7 @@
  */
 
 export {SignalHandler} from './lib/signal-handler.js';
+export type {SignalHandlerOptions} from './lib/signal-handler.js';
 export {RemoteSignal} from './lib/remote-signal.js';
 export type {
   AnySignal,

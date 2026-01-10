@@ -3,15 +3,30 @@
  *
  * RemoteSignal wraps a local Signal.State and exposes only read access.
  * Updates come from the sender via the update() method.
+ *
+ * The RemoteSignal uses Signal.subtle.watched/unwatched callbacks to lazily
+ * request watching on the sender side. This allows signals with watched callbacks
+ * on the sender to not start their work until something on the receiver actually
+ * observes the signal.
  */
 
 import {Signal} from 'signal-polyfill';
+
+/**
+ * Callback for watch state changes on a RemoteSignal.
+ * @internal
+ */
+export type WatchStateCallback = (signalId: number, watching: boolean) => void;
 
 /**
  * A read-only signal that represents a signal on the sender side.
  *
  * The receiver can read the value synchronously via `get()`, but cannot
  * write to it. Writes throw an error.
+ *
+ * The signal lazily subscribes to updates - the sender only starts watching
+ * the source signal when something on the receiver side observes this
+ * RemoteSignal (e.g., via an effect or computed).
  *
  * @example
  * ```ts
@@ -20,7 +35,7 @@ import {Signal} from 'signal-polyfill';
  * console.log(count.get());  // 0 (initial value available synchronously)
  *
  * effect(() => {
- *   console.log('Count:', count.get());  // Reactive!
+ *   console.log('Count:', count.get());  // Reactive! Sender starts watching here.
  * });
  * ```
  */
@@ -28,6 +43,7 @@ export class RemoteSignal<T> {
   /**
    * Internal state signal that holds the current value.
    * We use Signal.State internally so effects can track this signal.
+   * This signal has watched/unwatched callbacks to notify the handler.
    */
   readonly #state: Signal.State<T>;
 
@@ -36,9 +52,28 @@ export class RemoteSignal<T> {
    */
   readonly #signalId: number;
 
-  constructor(signalId: number, initialValue: T) {
+  /**
+   * Callback to notify the handler of watch state changes.
+   */
+  #onWatchStateChange: WatchStateCallback | undefined;
+
+  constructor(
+    signalId: number,
+    initialValue: T,
+    onWatchStateChange?: WatchStateCallback,
+  ) {
     this.#signalId = signalId;
-    this.#state = new Signal.State(initialValue);
+    this.#onWatchStateChange = onWatchStateChange;
+
+    // Create the state with watched/unwatched callbacks
+    this.#state = new Signal.State(initialValue, {
+      [Signal.subtle.watched]: () => {
+        this.#onWatchStateChange?.(this.#signalId, true);
+      },
+      [Signal.subtle.unwatched]: () => {
+        this.#onWatchStateChange?.(this.#signalId, false);
+      },
+    });
   }
 
   /**

@@ -13,7 +13,8 @@ import {fileURLToPath} from 'node:url';
 import {dirname, join} from 'node:path';
 import {wrap} from '@supertalk/core';
 import type {Endpoint} from '@supertalk/core';
-import {SignalHandler, type RemoteSignal} from '../../index.js';
+import {SignalHandler} from '../../index.js';
+import type {SignalHandlerOptions, RemoteSignal} from '../../index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKER_PATH = join(__dirname, 'signal-worker.js');
@@ -87,26 +88,41 @@ export interface WorkerContext<T> {
 }
 
 /**
+ * Options for createWorker.
+ */
+export interface CreateWorkerOptions {
+  /** Options to pass to SignalHandler on both sides */
+  signalHandlerOptions?: SignalHandlerOptions;
+}
+
+/**
  * Create a worker with the specified service type.
  */
 export function createWorker(
   serviceType: 'counter',
+  options?: CreateWorkerOptions,
 ): Promise<WorkerContext<CounterService>>;
 export function createWorker(
   serviceType: 'computed',
+  options?: CreateWorkerOptions,
 ): Promise<WorkerContext<ComputedService>>;
 export function createWorker(
   serviceType: 'multi',
+  options?: CreateWorkerOptions,
 ): Promise<WorkerContext<MultiService>>;
 export async function createWorker(
   serviceType: ServiceType,
+  options: CreateWorkerOptions = {},
 ): Promise<WorkerContext<unknown>> {
   const worker = new Worker(WORKER_PATH, {
-    workerData: {serviceType},
+    workerData: {
+      serviceType,
+      signalHandlerOptions: options.signalHandlerOptions,
+    },
   });
 
   const endpoint = workerToEndpoint(worker);
-  const signalHandler = new SignalHandler();
+  const signalHandler = new SignalHandler(options.signalHandlerOptions);
   const remote = await wrap(endpoint, {
     handlers: [signalHandler],
   });

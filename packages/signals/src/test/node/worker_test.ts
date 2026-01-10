@@ -46,7 +46,9 @@ void suite('@supertalk/signals (worker)', () => {
 
   void suite('Signal updates', () => {
     void test('updates propagate to receiver', async () => {
-      await using ctx = await createWorker('counter');
+      await using ctx = await createWorker('counter', {
+        signalHandlerOptions: {autoWatch: true},
+      });
       const count = await ctx.remote.getCount();
       assert.strictEqual(count.get(), 0);
 
@@ -60,7 +62,9 @@ void suite('@supertalk/signals (worker)', () => {
     });
 
     void test('multiple updates are batched', async () => {
-      await using ctx = await createWorker('counter');
+      await using ctx = await createWorker('counter', {
+        signalHandlerOptions: {autoWatch: true},
+      });
       const count = await ctx.remote.getCount();
       assert.strictEqual(count.get(), 0);
 
@@ -77,7 +81,9 @@ void suite('@supertalk/signals (worker)', () => {
     });
 
     void test('computed updates when dependency changes', async () => {
-      await using ctx = await createWorker('computed');
+      await using ctx = await createWorker('computed', {
+        signalHandlerOptions: {autoWatch: true},
+      });
       const doubled = await ctx.remote.getDoubled();
       assert.strictEqual(doubled.get(), 0);
 
@@ -91,7 +97,9 @@ void suite('@supertalk/signals (worker)', () => {
 
   void suite('Signal reactivity', () => {
     void test('RemoteSignal works with local Signal.Computed', async () => {
-      await using ctx = await createWorker('counter');
+      await using ctx = await createWorker('counter', {
+        signalHandlerOptions: {autoWatch: true},
+      });
       const count = await ctx.remote.getCount();
 
       // Create a local computed that depends on the remote signal
@@ -110,7 +118,9 @@ void suite('@supertalk/signals (worker)', () => {
       // Create a local signal with the same pattern
       const localCount = new Signal.State(100);
 
-      await using ctx = await createWorker('counter');
+      await using ctx = await createWorker('counter', {
+        signalHandlerOptions: {autoWatch: true},
+      });
       const remoteCount = await ctx.remote.getCount();
 
       // They should be completely independent
