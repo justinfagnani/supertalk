@@ -524,6 +524,38 @@ void suite('@supertalk/signals', () => {
       assert.strictEqual(ctx.senderHandler._isWatching(1), false);
     });
 
+    void test('re-sending a signal updates the existing RemoteSignal value', async () => {
+      // When autoWatch is false, updates don't flow automatically.
+      // But if the same signal is sent again (e.g., via a new method call),
+      // the existing RemoteSignal should be updated with the new value.
+      const count = new Signal.State(1);
+
+      using ctx = await setupSignalService({
+        getCount() {
+          return count;
+        },
+      });
+
+      // Get the signal - initial value is 1
+      const first =
+        (await ctx.remote.getCount()) as unknown as RemoteSignal<number>;
+      assert.strictEqual(first.get(), 1);
+
+      // Update on sender side (no watcher, so no automatic update)
+      count.set(2);
+
+      // Get the signal again via a new method call
+      const second =
+        (await ctx.remote.getCount()) as unknown as RemoteSignal<number>;
+
+      // Should be the same RemoteSignal instance
+      assert.strictEqual(first, second);
+
+      // Value should be updated to 2
+      assert.strictEqual(first.get(), 2);
+      assert.strictEqual(second.get(), 2);
+    });
+
     void test('[Signal.subtle.watched] on source is NOT called just because signal was sent', async () => {
       let watchedCalled = false;
 

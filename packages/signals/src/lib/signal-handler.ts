@@ -196,15 +196,17 @@ export class SignalHandler implements Handler<AnySignal, WireSignal> {
     wire: WireSignal,
     ctx: FromWireContext,
   ): RemoteSignal<unknown> {
+    // Deserialize the initial value through the context to handle nested proxies
+    const initialValue = ctx.fromWire(wire.value as WireValue);
+
     // Check if we already have this signal (via WeakRef)
     const existingRef = this.#remoteSignals.get(wire.signalId);
     const existing = existingRef?.deref();
     if (existing !== undefined) {
+      // Update the existing signal with the new value
+      existing._update(initialValue);
       return existing;
     }
-
-    // Deserialize the initial value through the context to handle nested proxies
-    const initialValue = ctx.fromWire(wire.value as WireValue);
 
     // Create new RemoteSignal with initial value and watch state callback
     const remote = new RemoteSignal(
