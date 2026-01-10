@@ -30,8 +30,8 @@ export interface SignalServiceContext<R> {
   /** The underlying ports (exposed for advanced use cases) */
   port1: MessagePort;
   port2: MessagePort;
-  /** Dispose method for `using` declarations */
-  [Symbol.dispose]: () => void;
+  /** Async dispose method for `await using` declarations */
+  [Symbol.asyncDispose]: () => Promise<void>;
 }
 
 /**
@@ -84,9 +84,10 @@ export async function setupSignalService<T extends object>(
     receiverHandler,
     port1,
     port2,
-    [Symbol.dispose]() {
+    [Symbol.asyncDispose]() {
       port1.close();
       port2.close();
+      return Promise.resolve();
     },
   };
 }

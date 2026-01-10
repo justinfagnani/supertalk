@@ -36,7 +36,7 @@ void suite('@supertalk/signals', () => {
     void test('Signal.State is transferred with initial value', async () => {
       const count = new Signal.State(42);
 
-      using ctx = await setupSignalService({
+      await using ctx = await setupSignalService({
         get count() {
           return count;
         },
@@ -54,7 +54,7 @@ void suite('@supertalk/signals', () => {
     void test('Signal.State initial value is available synchronously', async () => {
       const name = new Signal.State('Alice');
 
-      using ctx = await setupSignalService({
+      await using ctx = await setupSignalService({
         get name() {
           return name;
         },
@@ -71,7 +71,7 @@ void suite('@supertalk/signals', () => {
       const count = new Signal.State(5);
       const doubled = new Signal.Computed(() => count.get() * 2);
 
-      using ctx = await setupSignalService({
+      await using ctx = await setupSignalService({
         get doubled() {
           return doubled;
         },
@@ -87,7 +87,7 @@ void suite('@supertalk/signals', () => {
       const a = new Signal.State(1);
       const b = new Signal.State(2);
 
-      using ctx = await setupSignalService({
+      await using ctx = await setupSignalService({
         get a() {
           return a;
         },
@@ -142,7 +142,7 @@ void suite('@supertalk/signals', () => {
     void test('updates propagate to receiver', async () => {
       const count = new Signal.State(0);
 
-      using ctx = await setupSignalService(
+      await using ctx = await setupSignalService(
         {
           get count() {
             return count;
@@ -170,7 +170,7 @@ void suite('@supertalk/signals', () => {
       const a = new Signal.State(0);
       const b = new Signal.State(0);
 
-      using ctx = await setupSignalService(
+      await using ctx = await setupSignalService(
         {
           get a() {
             return a;
@@ -208,7 +208,7 @@ void suite('@supertalk/signals', () => {
       const count = new Signal.State(5);
       const doubled = new Signal.Computed(() => count.get() * 2);
 
-      using ctx = await setupSignalService(
+      await using ctx = await setupSignalService(
         {
           get count() {
             return count;
@@ -246,7 +246,7 @@ void suite('@supertalk/signals', () => {
     void test('RemoteSignal works with Signal.Computed', async () => {
       const count = new Signal.State(5);
 
-      using ctx = await setupSignalService(
+      await using ctx = await setupSignalService(
         {
           get count() {
             return count;
@@ -281,7 +281,7 @@ void suite('@supertalk/signals', () => {
     void test('accessing same signal twice returns same RemoteSignal instance', async () => {
       const count = new Signal.State(42);
 
-      using ctx = await setupSignalService({
+      await using ctx = await setupSignalService({
         get count() {
           return count;
         },
@@ -297,7 +297,7 @@ void suite('@supertalk/signals', () => {
     void test('sender tracks each signal only once', async () => {
       const count = new Signal.State(0);
 
-      using ctx = await setupSignalService({
+      await using ctx = await setupSignalService({
         get count() {
           return count;
         },
@@ -317,7 +317,7 @@ void suite('@supertalk/signals', () => {
     void test('releaseSignal removes signal from sender tracking', async () => {
       const count = new Signal.State(0);
 
-      using ctx = await setupSignalService(
+      await using ctx = await setupSignalService(
         {
           get count() {
             return count;
@@ -343,7 +343,7 @@ void suite('@supertalk/signals', () => {
     void test('signal:release message triggers cleanup on sender', async () => {
       const count = new Signal.State(0);
 
-      using ctx = await setupSignalService(
+      await using ctx = await setupSignalService(
         {
           get count() {
             return count;
@@ -368,7 +368,7 @@ void suite('@supertalk/signals', () => {
     void test('updates stop after signal is released', async () => {
       const count = new Signal.State(0);
 
-      using ctx = await setupSignalService(
+      await using ctx = await setupSignalService(
         {
           get count() {
             return count;
@@ -400,7 +400,7 @@ void suite('@supertalk/signals', () => {
     void test('receiver tracks remote signals via WeakRef', async () => {
       const count = new Signal.State(0);
 
-      using ctx = await setupSignalService({
+      await using ctx = await setupSignalService({
         get count() {
           return count;
         },
@@ -420,7 +420,7 @@ void suite('@supertalk/signals', () => {
         increment: () => 1,
       });
 
-      using ctx = await setupSignalService(
+      await using ctx = await setupSignalService(
         {
           get data() {
             return data;
@@ -438,6 +438,7 @@ void suite('@supertalk/signals', () => {
       assert.strictEqual(remoteData.get().value, 42);
 
       // The nested function should be proxied and callable
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- proxied function returns Promise at runtime
       const result = await remoteData.get().increment();
       assert.strictEqual(result, 1);
     });
@@ -453,7 +454,7 @@ void suite('@supertalk/signals', () => {
         nested: {count: 0},
       });
 
-      using ctx = await setupSignalService(
+      await using ctx = await setupSignalService(
         {
           get data() {
             return data;
@@ -488,7 +489,7 @@ void suite('@supertalk/signals', () => {
     void test('signal value with nested array of functions', async () => {
       const handlers = new Signal.State([() => 'first', () => 'second']);
 
-      using ctx = await setupSignalService(
+      await using ctx = await setupSignalService(
         {
           get handlers() {
             return handlers;
@@ -502,7 +503,9 @@ void suite('@supertalk/signals', () => {
 
       const arr = remoteHandlers.get();
       assert.strictEqual(arr.length, 2);
+      // eslint-disable-next-line @typescript-eslint/await-thenable, @typescript-eslint/no-non-null-assertion -- proxied functions return Promises at runtime
       assert.strictEqual(await arr[0]!(), 'first');
+      // eslint-disable-next-line @typescript-eslint/await-thenable, @typescript-eslint/no-non-null-assertion -- proxied functions return Promises at runtime
       assert.strictEqual(await arr[1]!(), 'second');
     });
   });
@@ -511,7 +514,7 @@ void suite('@supertalk/signals', () => {
     void test('sender does not watch signal immediately when sent', async () => {
       const count = new Signal.State(0);
 
-      using ctx = await setupSignalService({
+      await using ctx = await setupSignalService({
         get count() {
           return count;
         },
@@ -530,7 +533,7 @@ void suite('@supertalk/signals', () => {
       // the existing RemoteSignal should be updated with the new value.
       const count = new Signal.State(1);
 
-      using ctx = await setupSignalService({
+      await using ctx = await setupSignalService({
         getCount() {
           return count;
         },
@@ -565,7 +568,7 @@ void suite('@supertalk/signals', () => {
         },
       });
 
-      using ctx = await setupSignalService({
+      await using ctx = await setupSignalService({
         get count() {
           return count;
         },
@@ -591,7 +594,7 @@ void suite('@supertalk/signals', () => {
         },
       });
 
-      using ctx = await setupSignalService({
+      await using ctx = await setupSignalService({
         get count() {
           return count;
         },
@@ -621,7 +624,7 @@ void suite('@supertalk/signals', () => {
         },
       });
 
-      using ctx = await setupSignalService({
+      await using ctx = await setupSignalService({
         get count() {
           return count;
         },
@@ -633,10 +636,11 @@ void suite('@supertalk/signals', () => {
       assert.strictEqual(watchedCalled, false);
 
       // Create a watcher that observes the remote signal
+      // eslint-disable-next-line @typescript-eslint/no-empty-function -- Watcher callback intentionally empty
       const watcher = new Signal.subtle.Watcher(() => {});
       const computed = new Signal.Computed(() => remoteCount.get());
       watcher.watch(computed);
-      computed.get(); // Establish subscription
+      void computed.get(); // Establish subscription
 
       // Wait for watch message to propagate
       await waitForMessages();
@@ -657,7 +661,7 @@ void suite('@supertalk/signals', () => {
         },
       });
 
-      using ctx = await setupSignalService({
+      await using ctx = await setupSignalService({
         get count() {
           return count;
         },
@@ -666,10 +670,11 @@ void suite('@supertalk/signals', () => {
       const remoteCount = await ctx.remote.count;
 
       // Create a watcher that observes the remote signal
+      // eslint-disable-next-line @typescript-eslint/no-empty-function -- Watcher callback intentionally empty
       const watcher = new Signal.subtle.Watcher(() => {});
       const computed = new Signal.Computed(() => remoteCount.get());
       watcher.watch(computed);
-      computed.get(); // Establish subscription
+      void computed.get(); // Establish subscription
 
       await waitForMessages();
       assert.strictEqual(unwatchedCalled, false);
@@ -687,7 +692,7 @@ void suite('@supertalk/signals', () => {
     void test('updates only flow when receiver is watching reactively', async () => {
       const count = new Signal.State(0);
 
-      using ctx = await setupSignalService({
+      await using ctx = await setupSignalService({
         get count() {
           return count;
         },
@@ -706,6 +711,7 @@ void suite('@supertalk/signals', () => {
       assert.strictEqual(remoteCount.get(), 0); // Still 0!
 
       // Now start watching reactively
+      // eslint-disable-next-line @typescript-eslint/no-empty-function -- Watcher callback intentionally empty
       const watcher = new Signal.subtle.Watcher(() => {});
       const computed = new Signal.Computed(() => remoteCount.get());
       watcher.watch(computed);
@@ -731,7 +737,7 @@ void suite('@supertalk/signals', () => {
       });
 
       // Using explicit autoWatch: true
-      using ctx = await setupSignalService(
+      await using ctx = await setupSignalService(
         {
           get count() {
             return count;

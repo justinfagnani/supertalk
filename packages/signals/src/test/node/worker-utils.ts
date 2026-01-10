@@ -83,8 +83,8 @@ export interface WorkerContext<T> {
   signalHandler: SignalHandler;
   /** The worker instance */
   worker: Worker;
-  /** Dispose method for `using` declarations */
-  [Symbol.dispose]: () => void;
+  /** Async dispose method for `await using` declarations */
+  [Symbol.asyncDispose]: () => Promise<void>;
 }
 
 /**
@@ -131,8 +131,8 @@ export async function createWorker(
     remote,
     signalHandler,
     worker,
-    [Symbol.dispose]() {
-      void worker.terminate();
+    async [Symbol.asyncDispose]() {
+      await worker.terminate();
     },
   };
 }

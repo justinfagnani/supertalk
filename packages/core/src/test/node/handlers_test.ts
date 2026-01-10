@@ -630,7 +630,7 @@ void suite('Handler lifecycle', () => {
     let connectCalled = false;
     let receivedCtx: HandlerConnectionContext | undefined;
 
-    const lifecycleHandler: Handler<unknown, object> = {
+    const lifecycleHandler: Handler = {
       wireType: 'test:lifecycle',
       canHandle: (_value: unknown): _value is unknown => false,
       toWire: (v) => v as object,
@@ -659,7 +659,7 @@ void suite('Handler lifecycle', () => {
   void test('disconnect() is called when connection closes', async () => {
     let disconnectCount = 0;
 
-    const lifecycleHandler: Handler<unknown, object> = {
+    const lifecycleHandler: Handler = {
       wireType: 'test:lifecycle',
       canHandle: (_value: unknown): _value is unknown => false,
       toWire: (v) => v as object,
@@ -692,7 +692,7 @@ void suite('Handler lifecycle', () => {
     const receivedMessages: Array<unknown> = [];
     let senderCtx: HandlerConnectionContext | undefined;
 
-    const senderHandler: Handler<unknown, object> = {
+    const senderHandler: Handler = {
       wireType: 'test:messaging',
       canHandle: (_value: unknown): _value is unknown => false,
       toWire: (v) => v as object,
@@ -701,7 +701,7 @@ void suite('Handler lifecycle', () => {
       },
     };
 
-    const receiverHandler: Handler<unknown, object> = {
+    const receiverHandler: Handler = {
       wireType: 'test:messaging',
       canHandle: (_value: unknown): _value is unknown => false,
       toWire: (v) => v as object,
@@ -734,7 +734,7 @@ void suite('Handler lifecycle', () => {
     let senderCtx: HandlerConnectionContext | undefined;
 
     // A handler that sends Maps in messages
-    const senderHandler: Handler<unknown, object> = {
+    const senderHandler: Handler = {
       wireType: 'test:serialized',
       canHandle: (_value: unknown): _value is unknown => false,
       toWire: (v) => v as object,
@@ -743,7 +743,7 @@ void suite('Handler lifecycle', () => {
       },
     };
 
-    const receiverHandler: Handler<unknown, object> = {
+    const receiverHandler: Handler = {
       wireType: 'test:serialized',
       canHandle: (_value: unknown): _value is unknown => false,
       toWire: (v) => v as object,
@@ -785,7 +785,7 @@ void suite('Handler lifecycle', () => {
     let port1Ctx: HandlerConnectionContext | undefined;
     let port2Ctx: HandlerConnectionContext | undefined;
 
-    const port1Handler: Handler<unknown, object> = {
+    const port1Handler: Handler = {
       wireType: 'test:bidir',
       canHandle: (_value: unknown): _value is unknown => false,
       toWire: (v) => v as object,
@@ -797,7 +797,7 @@ void suite('Handler lifecycle', () => {
       },
     };
 
-    const port2Handler: Handler<unknown, object> = {
+    const port2Handler: Handler = {
       wireType: 'test:bidir',
       canHandle: (_value: unknown): _value is unknown => false,
       toWire: (v) => v as object,

@@ -30,7 +30,6 @@ import type {
   HandlerConnectionContext,
   ToWireContext,
   FromWireContext,
-  WireValue,
 } from '@supertalk/core';
 import {RemoteSignal} from './remote-signal.js';
 import type {AnySignal, WireSignal, SignalBatchUpdate} from './types.js';
@@ -197,7 +196,7 @@ export class SignalHandler implements Handler<AnySignal, WireSignal> {
     ctx: FromWireContext,
   ): RemoteSignal<unknown> {
     // Deserialize the initial value through the context to handle nested proxies
-    const initialValue = ctx.fromWire(wire.value as WireValue);
+    const initialValue = ctx.fromWire(wire.value);
 
     // Check if we already have this signal (via WeakRef)
     const existingRef = this.#remoteSignals.get(wire.signalId);

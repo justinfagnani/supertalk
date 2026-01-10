@@ -23,7 +23,6 @@ import type {
   Handler,
   ToWireContext,
   FromWireContext,
-  HandlerConnectionContext,
 } from './types.js';
 import {isWireProxy, isWirePromise} from './types.js';
 import {PROXY_PROPERTY_BRAND, WIRE_TYPE, HANDSHAKE_ID} from './constants.js';
