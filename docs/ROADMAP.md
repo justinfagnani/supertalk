@@ -750,6 +750,8 @@ const result = await api.doSomething();
 - GraphQL-style selective fetching
 - Schema generation for documentation
 
+See [Add-on Packages](ADDON-PACKAGES.md) for brainstormed `@supertalk/*` packages including handlers, transports, and framework integrations.
+
 ---
 
 ## Known Issues / To Investigate
