@@ -45,12 +45,16 @@
     "comlink",
     "typescript"
   ],
-  "author": "",
+  "author": "Justin Fagnani",
   "license": "MIT",
+  "homepage": "https://github.com/justinfagnani/supertalk#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/user/supertalk.git",
+    "url": "https://github.com/justinfagnani/supertalk.git",
     "directory": "packages/supertalk"
+  },
+  "bugs": {
+    "url": "https://github.com/justinfagnani/supertalk/issues"
   },
   "dependencies": {
     "@supertalk/core": "0.0.1"

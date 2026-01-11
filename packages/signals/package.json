@@ -57,12 +57,16 @@
     "reactive",
     "Supertalk"
   ],
-  "author": "",
+  "author": "Justin Fagnani",
   "license": "MIT",
+  "homepage": "https://github.com/justinfagnani/supertalk/tree/main/packages/signals#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/user/supertalk.git",
+    "url": "https://github.com/justinfagnani/supertalk.git",
     "directory": "packages/signals"
+  },
+  "bugs": {
+    "url": "https://github.com/justinfagnani/supertalk/issues"
   },
   "dependencies": {
     "@supertalk/core": "^0.0.1"
