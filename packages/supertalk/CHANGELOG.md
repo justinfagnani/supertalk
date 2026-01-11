@@ -1,5 +1,13 @@
 # supertalk
 
+## 0.0.3
+
+### Patch Changes
+
+- cb844ea: Add nodeEndpoint() wrapper function for Node Worker support
+- Updated dependencies [cb844ea]
+  - @supertalk/core@0.0.2
+
 ## 0.0.2
 
 ### Patch Changes
