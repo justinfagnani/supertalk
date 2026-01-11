@@ -5,11 +5,8 @@
     "rootDir": "src",
     "tsBuildInfoFile": ".tsbuildinfo",
     "composite": true,
-    "paths": {
-      "@supertalk/core": ["../core/src/index.ts"]
-    },
-    "baseUrl": "."
   },
   "include": ["src/**/*.ts"],
+  "exclude": [],
   "references": [{"path": "../core"}]
 }

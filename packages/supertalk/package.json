@@ -20,7 +20,7 @@
   },
   "wireit": {
     "build": {
-      "command": "tsc --build --pretty",
+      "command": "tsc --pretty",
       "dependencies": [
         "../core:build"
       ],
