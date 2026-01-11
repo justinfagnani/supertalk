@@ -1,6 +1,6 @@
 {
   "name": "@supertalk/signals",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "TC39 Signals integration for Supertalk",
   "type": "module",
   "exports": {
@@ -65,7 +65,7 @@
     "directory": "packages/signals"
   },
   "dependencies": {
-    "@supertalk/core": "^0.0.0"
+    "@supertalk/core": "^0.0.1"
   },
   "peerDependencies": {
     "signal-polyfill": "^0.2.0"
