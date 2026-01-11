@@ -68,6 +68,9 @@
   "bugs": {
     "url": "https://github.com/justinfagnani/supertalk/issues"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@supertalk/core": "^0.0.1"
   },
