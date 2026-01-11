@@ -336,6 +336,42 @@ Proxied objects are tracked with registries on both sides.
 - **Consumer side**: Holds weak references; when GC'd, notifies source to
   release.
 
+### Node.js Worker Threads
+
+For Node.js `worker_threads`, use the `nodeEndpoint` adapter to convert the
+Node-style event API (`on`/`off`) to the browser-style API
+(`addEventListener`/`removeEventListener`).
+
+**main.ts:**
+
+```ts
+import {wrap} from 'supertalk';
+import {nodeEndpoint} from 'supertalk/node.js';
+import {Worker} from 'node:worker_threads';
+
+const worker = new Worker('./worker.js');
+const remote = await wrap<MyService>(nodeEndpoint(worker));
+
+const result = await remote.add(1, 2);
+worker.terminate();
+```
+
+**worker.ts:**
+
+```ts
+import {expose} from 'supertalk';
+import {parentPort} from 'node:worker_threads';
+
+const service = {
+  add(a: number, b: number) {
+    return a + b;
+  },
+};
+
+// parentPort is a MessagePort which has addEventListener/removeEventListener
+expose(service, parentPort!);
+```
+
 ## Ecosystem
 
 This package re-exports `@supertalk/core`. Additional packages are available for

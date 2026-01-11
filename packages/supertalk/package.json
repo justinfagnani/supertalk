@@ -7,13 +7,21 @@
     ".": {
       "types": "./index.d.ts",
       "default": "./index.js"
+    },
+    "./node.js": {
+      "types": "./node.d.ts",
+      "default": "./node.js"
     }
   },
   "files": [
     "index.js",
     "index.d.ts",
     "index.d.ts.map",
-    "index.js.map"
+    "index.js.map",
+    "node.js",
+    "node.d.ts",
+    "node.d.ts.map",
+    "node.js.map"
   ],
   "scripts": {
     "build": "wireit"
@@ -31,6 +39,7 @@
       ],
       "output": [
         "index.*",
+        "node.*",
         ".tsbuildinfo"
       ],
       "clean": "if-file-deleted"
