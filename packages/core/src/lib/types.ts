@@ -118,7 +118,10 @@ export type RemoteProxy<T> = {
  */
 export interface LocalHandle<T> {
   readonly [LOCAL_HANDLE]: true;
-  /** @internal */
+  /**
+   * The wrapped value. Do not access directly - use getHandleValue() instead.
+   * @internal
+   */
   readonly value: T;
 }
 

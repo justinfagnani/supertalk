@@ -134,7 +134,10 @@ export function handle<T>(value: T): LocalHandle<T> {
  *
  * This can only be used on the side that created the handle. Attempting to
  * dereference a RemoteHandle (received from the other side) will fail because
- * RemoteHandle doesn't actually contain the value.
+ * it's the same type but the value property won't contain the actual object.
+ *
+ * Note: RemoteHandle and LocalHandle are the same type for API consistency,
+ * but only LocalHandle instances created locally will have the actual value.
  *
  * @example
  * ```ts
@@ -144,6 +147,9 @@ export function handle<T>(value: T): LocalHandle<T> {
  * ```
  */
 export function getHandleValue<T>(handle: LocalHandle<T>): T {
+  if (!isLocalHandle(handle)) {
+    throw new TypeError('Expected a LocalHandle');
+  }
   return handle.value;
 }
 
