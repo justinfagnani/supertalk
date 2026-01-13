@@ -13,8 +13,8 @@ export {expose} from './lib/expose.js';
 export {wrap} from './lib/wrap.js';
 export {Connection} from './lib/connection.js';
 
-// Proxy and transfer markers
-export {proxy, transfer} from './lib/protocol.js';
+// Proxy, handle, and transfer markers
+export {proxy, handle, transfer} from './lib/protocol.js';
 export type {TransferMarker} from './lib/protocol.js';
 
 // Utilities
@@ -28,9 +28,12 @@ export type {
   Remoted,
   LocalProxy,
   RemoteProxy,
+  LocalHandle,
+  RemoteHandle,
   Message,
   WireValue,
   WireProxy,
+  WireHandle,
   WirePromise,
   Options,
   NestedProxyOptions,

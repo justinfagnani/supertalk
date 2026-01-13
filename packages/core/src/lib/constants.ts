@@ -20,6 +20,11 @@ export const WIRE_TYPE = '__supertalk_type__';
 export const LOCAL_PROXY = Symbol('supertalk.localProxy');
 
 /**
+ * Symbol used to brand local handle markers.
+ */
+export const LOCAL_HANDLE = Symbol('supertalk.localHandle');
+
+/**
  * Symbol used to brand transfer markers.
  */
 export const TRANSFER = Symbol('supertalk.transfer');

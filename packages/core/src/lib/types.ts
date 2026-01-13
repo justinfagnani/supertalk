@@ -11,7 +11,7 @@
  * @fileoverview Type definitions for the wire protocol.
  */
 
-import {WIRE_TYPE, type LOCAL_PROXY} from './constants.js';
+import {WIRE_TYPE, type LOCAL_PROXY, type LOCAL_HANDLE} from './constants.js';
 
 // ============================================================
 // Endpoint interface
@@ -88,6 +88,62 @@ export type RemoteProxy<T> = {
 };
 
 // ============================================================
+// LocalHandle / RemoteHandle types
+// ============================================================
+
+/**
+ * A value marked as an opaque handle when sent across the wire.
+ *
+ * Use `handle(value)` to create a LocalHandle. Handles are similar to proxies
+ * in terms of memory management and unwrapping, but don't provide any API on
+ * the receiving side. A handle is only useful for receiving and sending back
+ * to the remote side, or as a key representing the remote object.
+ *
+ * Handles are useful when you need consistent APIs in and out of workers but
+ * don't need to access the object's properties or methods on the remote side.
+ *
+ * @example
+ * ```ts
+ * // Service implementation
+ * const service = {
+ *   createToken(): LocalHandle<Token> {
+ *     return handle(new Token());
+ *   },
+ *   useToken(token: Token): void {
+ *     // token is unwrapped to the original Token instance
+ *   }
+ * };
+ * ```
+ */
+export interface LocalHandle<T> {
+  readonly [LOCAL_HANDLE]: true;
+  readonly value: T;
+}
+
+// handle() implementation is in protocol.ts
+
+/**
+ * The remote representation of a handled value.
+ * Completely opaque - no properties or methods are accessible.
+ *
+ * This is what you receive when the other side sends a `LocalHandle<T>`.
+ * It can only be used as an opaque reference to send back to the remote side.
+ *
+ * @example
+ * ```ts
+ * // If service.createToken() returns LocalHandle<Token>,
+ * // the caller receives RemoteHandle<Token>:
+ * const token = await remote.createToken();
+ * // token is opaque - no properties or methods accessible
+ * await remote.useToken(token);  // But can be sent back
+ * ```
+ */
+export type RemoteHandle<T> = {
+  readonly __brand: 'RemoteHandle';
+  readonly __type: T;
+};
+
+// ============================================================
 // Remote service types
 // ============================================================
 
@@ -156,6 +212,7 @@ type RemotedArgs<T extends Array<unknown>> = {
  * Recursively transforms a type for remote access.
  *
  * - `LocalProxy<T>` → `RemoteProxy<T>` (explicit proxies)
+ * - `LocalHandle<T>` → `RemoteHandle<T>` (opaque handles)
  * - Functions → async functions
  * - Arrays → recurse into elements
  * - Objects → recurse into properties
@@ -166,23 +223,28 @@ type RemotedArgs<T extends Array<unknown>> = {
  * // LocalProxy transforms to RemoteProxy
  * type T1 = Remoted<LocalProxy<Widget>>;  // RemoteProxy<Widget>
  *
+ * // LocalHandle transforms to RemoteHandle
+ * type T2 = Remoted<LocalHandle<Token>>;  // RemoteHandle<Token>
+ *
  * // Functions become async
- * type T2 = Remoted<() => number>;  // () => Promise<number>
+ * type T3 = Remoted<() => number>;  // () => Promise<number>
  *
  * // Objects recurse
- * type T3 = Remoted<{ fn: () => void }>;  // { fn: () => Promise<void> }
+ * type T4 = Remoted<{ fn: () => void }>;  // { fn: () => Promise<void> }
  * ```
  */
 export type Remoted<T> =
   T extends LocalProxy<infer U>
     ? RemoteProxy<U>
-    : T extends AnyFunction
-      ? (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>>>
-      : T extends Array<infer U>
-        ? Array<Remoted<U>>
-        : T extends object
-          ? {[K in keyof T]: Remoted<T[K]>}
-          : T;
+    : T extends LocalHandle<infer U>
+      ? RemoteHandle<U>
+      : T extends AnyFunction
+        ? (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>>>
+        : T extends Array<infer U>
+          ? Array<Remoted<U>>
+          : T extends object
+            ? {[K in keyof T]: Remoted<T[K]>}
+            : T;
 
 /**
  * Message types for the wire protocol.
@@ -196,6 +258,7 @@ export type Message =
   | ReturnMessage
   | ThrowMessage
   | ReleaseMessage
+  | ReleaseHandleMessage
   | PromiseResolveMessage
   | PromiseRejectMessage
   | HandlerMessage;
@@ -243,6 +306,14 @@ export interface ThrowMessage {
 export interface ReleaseMessage {
   type: 'release';
   proxyId: number;
+}
+
+/**
+ * Release a handle, allowing the source to garbage collect the target.
+ */
+export interface ReleaseHandleMessage {
+  type: 'release-handle';
+  handleId: number;
 }
 
 /**
@@ -365,6 +436,11 @@ export interface WireProxy {
   proxyId: number;
 }
 
+export interface WireHandle {
+  [WIRE_TYPE]: 'handle';
+  handleId: number;
+}
+
 export interface WirePromise {
   [WIRE_TYPE]: 'promise';
   promiseId: number;
@@ -390,6 +466,11 @@ const asWire = (v: unknown): WireRecord | undefined =>
 export function isWireProxy(value: unknown): value is WireProxy {
   const w = asWire(value);
   return w?.[WIRE_TYPE] === 'proxy' && typeof w['proxyId'] === 'number';
+}
+
+export function isWireHandle(value: unknown): value is WireHandle {
+  const w = asWire(value);
+  return w?.[WIRE_TYPE] === 'handle' && typeof w['handleId'] === 'number';
 }
 
 export function isWirePromise(value: unknown): value is WirePromise {

@@ -16,8 +16,9 @@ import type {
   SerializedError,
   ProxyPropertyMetadata,
   LocalProxy,
+  LocalHandle,
 } from './types.js';
-import {LOCAL_PROXY, PROXY_PROPERTY_BRAND, TRANSFER} from './constants.js';
+import {LOCAL_PROXY, LOCAL_HANDLE, PROXY_PROPERTY_BRAND, TRANSFER} from './constants.js';
 
 // ============================================================
 // Proxy marker
@@ -70,6 +71,58 @@ export function isLocalProxy(value: unknown): value is LocalProxy<unknown> {
     typeof value === 'object' &&
     value !== null &&
     Object.hasOwn(value, LOCAL_PROXY)
+  );
+}
+
+// ============================================================
+// Handle marker
+// ============================================================
+
+/**
+ * Creates a LocalHandle marker for opaque handle passing.
+ *
+ * Use this to mark values that should be passed as opaque handles rather than
+ * proxied or cloned. Handles work like proxies in terms of memory management
+ * and unwrapping, but don't provide any API on the receiving side.
+ *
+ * A handle is only useful for receiving and sending back to the remote side,
+ * or as a key representing the remote object. This enables consistent APIs
+ * in and out of workers without exposing the full object interface.
+ *
+ * **When to use `handle()`:**
+ * - **Opaque tokens** — Values used as keys or references
+ * - **Consistent APIs** — Same function signature in and out of workers
+ * - **Security** — Don't expose object internals to remote side
+ *
+ * **When NOT to use `handle()`:**
+ * - If you need to access properties/methods on the remote side (use `proxy()`)
+ * - Simple data that can be cloned
+ *
+ * @example
+ * ```ts
+ * // Create an opaque token
+ * createSession(): LocalHandle<Session> {
+ *   return handle(new Session());  // Remote side gets opaque handle
+ * }
+ *
+ * // Use the handle
+ * useSession(session: Session): void {
+ *   // session is unwrapped to the original Session instance
+ * }
+ * ```
+ */
+export function handle<T>(value: T): LocalHandle<T> {
+  return {[LOCAL_HANDLE]: true, value};
+}
+
+/**
+ * Check if a value is a LocalHandle marker.
+ */
+export function isLocalHandle(value: unknown): value is LocalHandle<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Object.hasOwn(value, LOCAL_HANDLE)
   );
 }
 

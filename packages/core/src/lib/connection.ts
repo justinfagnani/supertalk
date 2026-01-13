@@ -24,10 +24,11 @@ import type {
   ToWireContext,
   FromWireContext,
 } from './types.js';
-import {isWireProxy, isWirePromise} from './types.js';
+import {isWireProxy, isWirePromise, isWireHandle} from './types.js';
 import {PROXY_PROPERTY_BRAND, WIRE_TYPE, HANDSHAKE_ID} from './constants.js';
 import {
   isLocalProxy,
+  isLocalHandle,
   isProxyProperty,
   isPromise,
   isTransferMarker,
@@ -93,6 +94,14 @@ export class Connection {
   #remoteByProxy = new WeakMap<object, number>();
   #remoteCleanup: FinalizationRegistry<number>;
 
+  // Registry for handles (similar to proxies but opaque)
+  #nextHandleId = 0;
+  #handleLocalById = new Map<number, object>();
+  #handleLocalByObject = new WeakMap<object, number>();
+  #handleRemoteById = new Map<number, WeakRef<object>>();
+  #handleRemoteByHandle = new WeakMap<object, number>();
+  #handleRemoteCleanup: FinalizationRegistry<number>;
+
   // Pending RPC calls awaiting response
   #nextCallId = 1;
   #pendingCalls = new Map<number, PendingCall>();
@@ -128,6 +137,12 @@ export class Connection {
     this.#remoteCleanup = new FinalizationRegistry((proxyId: number) => {
       this.#remoteById.delete(proxyId);
       endpoint.postMessage({type: 'release', proxyId});
+    });
+
+    // Set up finalization registry to notify remote when handles are GC'd
+    this.#handleRemoteCleanup = new FinalizationRegistry((handleId: number) => {
+      this.#handleRemoteById.delete(handleId);
+      endpoint.postMessage({type: 'release-handle', handleId});
     });
 
     // Bind and attach message handler
@@ -256,6 +271,65 @@ export class Connection {
   }
 
   // ============================================================
+  // Handle registry (opaque references, similar to proxies)
+  // ============================================================
+
+  /**
+   * Register a local object as a handle and return its ID.
+   */
+  #registerHandle(obj: object): number {
+    const existing = this.#handleLocalByObject.get(obj);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const id = this.#nextHandleId++;
+    this.#handleLocalById.set(id, obj);
+    this.#handleLocalByObject.set(obj, id);
+    return id;
+  }
+
+  /**
+   * Get a local handle object by its ID.
+   */
+  #getHandleLocal(id: number): object | undefined {
+    return this.#handleLocalById.get(id);
+  }
+
+  /**
+   * Release a local handle by its ID.
+   */
+  #releaseHandleLocal(id: number): void {
+    const obj = this.#handleLocalById.get(id);
+    if (obj !== undefined) {
+      this.#handleLocalById.delete(id);
+      this.#handleLocalByObject.delete(obj);
+    }
+  }
+
+  /**
+   * Store a remote handle for a remote object ID.
+   */
+  #setRemoteHandle(handleId: number, handle: object): void {
+    this.#handleRemoteById.set(handleId, new WeakRef(handle));
+    this.#handleRemoteByHandle.set(handle, handleId);
+    this.#handleRemoteCleanup.register(handle, handleId);
+  }
+
+  /**
+   * Get the remote handle for an ID, if still alive.
+   */
+  #getRemoteHandle(handleId: number): object | undefined {
+    return this.#handleRemoteById.get(handleId)?.deref();
+  }
+
+  /**
+   * Get the remote handle ID for a handle object, if it exists.
+   */
+  #getRemoteHandleId(handle: object): number | undefined {
+    return this.#handleRemoteByHandle.get(handle);
+  }
+
+  // ============================================================
   // Wire value serialization
   // ============================================================
 
@@ -288,6 +362,11 @@ export class Connection {
       return this.#makeProxyWire(value.value as object);
     }
 
+    // LocalHandle markers are explicitly handled
+    if (isLocalHandle(value)) {
+      return this.#makeHandleWire(value.value as object);
+    }
+
     // Functions are always proxied
     if (typeof value === 'function') {
       return this.#makeProxyWire(value as object);
@@ -302,6 +381,12 @@ export class Connection {
     const existingId = this.#getRemoteId(value);
     if (existingId !== undefined) {
       return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
+    }
+
+    // Check if this is a handle we received from remote - send back original ID
+    const existingHandleId = this.#getRemoteHandleId(value);
+    if (existingHandleId !== undefined) {
+      return {[WIRE_TYPE]: 'handle', handleId: existingHandleId};
     }
 
     // Promises get special handling
@@ -379,6 +464,18 @@ export class Connection {
   }
 
   /**
+   * Create a WireHandle for a value.
+   */
+  #makeHandleWire(value: object) {
+    const existingId = this.#getRemoteHandleId(value);
+    if (existingId !== undefined) {
+      return {[WIRE_TYPE]: 'handle', handleId: existingId};
+    }
+    const handleId = this.#registerHandle(value);
+    return {[WIRE_TYPE]: 'handle', handleId};
+  }
+
+  /**
    * Create a WirePromise for a promise.
    */
   #makePromiseWire(value: Promise<unknown>) {
@@ -407,6 +504,11 @@ export class Connection {
       return this.#makeProxyWire(value.value as object);
     }
 
+    // LocalHandle markers are explicitly handled
+    if (isLocalHandle(value)) {
+      return this.#makeHandleWire(value.value as object);
+    }
+
     // Functions are auto-proxied in nested mode
     if (typeof value === 'function') {
       if (!this.#nestedProxies) {
@@ -422,6 +524,11 @@ export class Connection {
     const existingId = this.#getRemoteId(value);
     if (existingId !== undefined) {
       return {[WIRE_TYPE]: 'proxy', proxyId: existingId};
+    }
+
+    const existingHandleId = this.#getRemoteHandleId(value);
+    if (existingHandleId !== undefined) {
+      return {[WIRE_TYPE]: 'handle', handleId: existingHandleId};
     }
 
     // Promises are auto-proxied in nested mode
@@ -492,6 +599,16 @@ export class Connection {
       return this.#createRemoteProxy(wire.proxyId);
     }
 
+    if (isWireHandle(wire)) {
+      const existing =
+        this.#getHandleLocal(wire.handleId) ??
+        this.#getRemoteHandle(wire.handleId);
+      if (existing) {
+        return existing;
+      }
+      return this.#createRemoteHandle(wire.handleId);
+    }
+
     if (isWirePromise(wire)) {
       return this.#createRemotePromise(wire.promiseId);
     }
@@ -543,6 +660,16 @@ export class Connection {
         return existing;
       }
       return this.#createRemoteProxy(value.proxyId);
+    }
+
+    if (isWireHandle(value)) {
+      const existing =
+        this.#getHandleLocal(value.handleId) ??
+        this.#getRemoteHandle(value.handleId);
+      if (existing) {
+        return existing;
+      }
+      return this.#createRemoteHandle(value.handleId);
     }
 
     if (isWirePromise(value)) {
@@ -666,6 +793,24 @@ export class Connection {
 
     this.#setRemote(proxyId, proxy);
     return proxy;
+  }
+
+  /**
+   * Create an opaque handle for a remote object.
+   * Handles are completely opaque - no properties or methods accessible.
+   */
+  #createRemoteHandle(handleId: number): object {
+    const existing = this.#getRemoteHandle(handleId);
+    if (existing) {
+      return existing;
+    }
+
+    // Create a simple opaque object with no properties or methods
+    // This is intentionally minimal to prevent any API access
+    const handle = Object.create(null) as object;
+
+    this.#setRemoteHandle(handleId, handle);
+    return handle;
   }
 
   /**
@@ -801,6 +946,13 @@ export class Connection {
       case 'release':
         this.#releaseLocal(message.proxyId);
         break;
+
+      case 'release-handle':
+        this.#releaseHandleLocal(
+          (message as {type: 'release-handle'; handleId: number}).handleId,
+        );
+        break;
+
       case 'promise-resolve': {
         const pending = this.#pendingRemotePromises.get(message.promiseId);
         if (pending) {
