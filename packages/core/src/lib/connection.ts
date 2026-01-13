@@ -601,9 +601,8 @@ export class Connection {
     }
 
     if (isWireHandle(wire)) {
-      const existing =
-        this.#getHandleLocal(wire.handleId) ??
-        this.#getRemoteHandle(wire.handleId);
+      // Handles don't auto-unwrap - they stay as opaque handles on both sides
+      const existing = this.#getRemoteHandle(wire.handleId);
       if (existing) {
         return existing;
       }
@@ -664,9 +663,8 @@ export class Connection {
     }
 
     if (isWireHandle(value)) {
-      const existing =
-        this.#getHandleLocal(value.handleId) ??
-        this.#getRemoteHandle(value.handleId);
+      // Handles don't auto-unwrap - they stay as opaque handles on both sides
+      const existing = this.#getRemoteHandle(value.handleId);
       if (existing) {
         return existing;
       }

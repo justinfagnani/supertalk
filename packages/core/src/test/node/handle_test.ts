@@ -4,15 +4,16 @@
  * This file tests opaque handle passing:
  * - Basic handle creation and passing
  * - Handle caching (same object = same handle)
- * - Handle unwrapping when sent back
+ * - Handles stay as handles (no auto-unwrapping)
+ * - getHandleValue() for explicit dereferencing
  * - Handles work in both shallow and nested modes
  */
 
 import {suite, test} from 'node:test';
 import * as assert from 'node:assert';
 import {setupService} from './test-utils.js';
-import {handle} from '../../index.js';
-import type {LocalHandle, Remoted} from '../../index.js';
+import {handle, getHandleValue} from '../../index.js';
+import type {LocalHandle} from '../../index.js';
 
 // A simple class for testing
 class Token {
@@ -28,18 +29,19 @@ class Token {
 }
 
 void suite('handle() - shallow mode', () => {
-  void test('handle can be passed as argument', async () => {
+  void test('handle can be passed and dereferenced', async () => {
     await using ctx = await setupService({
-      validateToken(token: Token): string {
-        // token is unwrapped to the original Token instance
+      validateToken(tokenHandle: LocalHandle<Token>): string {
+        // Explicitly dereference the handle
+        const token = getHandleValue(tokenHandle);
         return `Valid: ${token.getId()}`;
       },
     });
 
     const token = new Token('abc123');
-    // Pass the handle directly - it will be unwrapped on the remote side
+    const tokenHandle = handle(token);
     const result = await ctx.remote.validateToken(
-      handle(token) as unknown as Token,
+      tokenHandle as unknown as LocalHandle<Token>,
     );
     assert.strictEqual(result, 'Valid: abc123');
   });
@@ -49,17 +51,20 @@ void suite('handle() - shallow mode', () => {
       createToken(): LocalHandle<Token> {
         return handle(new Token('xyz789'));
       },
-      validateToken(token: Token): string {
+      validateToken(tokenHandle: LocalHandle<Token>): string {
+        const token = getHandleValue(tokenHandle);
         return `Valid: ${token.getId()}`;
       },
     });
 
     // Receive an opaque handle
-    const token = await ctx.remote.createToken();
+    const tokenHandle = await ctx.remote.createToken();
     // Handle is opaque - no properties or methods accessible
-    assert.strictEqual(typeof token, 'object');
+    assert.strictEqual(typeof tokenHandle, 'object');
     // But can be sent back to the remote side
-    const result = await ctx.remote.validateToken(token as unknown as Token);
+    const result = await ctx.remote.validateToken(
+      tokenHandle as unknown as LocalHandle<Token>,
+    );
     assert.strictEqual(result, 'Valid: xyz789');
   });
 
@@ -67,16 +72,21 @@ void suite('handle() - shallow mode', () => {
     const sharedToken = new Token('shared');
 
     await using ctx = await setupService({
-      checkIdentity(tokens: {a: Token; b: Token}): boolean {
-        // Both references should be to the same token
-        return tokens.a === tokens.b;
+      checkIdentity(handles: {
+        a: LocalHandle<Token>;
+        b: LocalHandle<Token>;
+      }): boolean {
+        // Both handles should refer to the same token
+        const tokenA = getHandleValue(handles.a);
+        const tokenB = getHandleValue(handles.b);
+        return tokenA === tokenB;
       },
     });
 
     const wrapped = handle(sharedToken);
     const result = await ctx.remote.checkIdentity({
-      a: wrapped as unknown as Token,
-      b: wrapped as unknown as Token,
+      a: wrapped as unknown as LocalHandle<Token>,
+      b: wrapped as unknown as LocalHandle<Token>,
     });
     assert.strictEqual(result, true);
   });
@@ -86,27 +96,40 @@ void suite('handle() - shallow mode', () => {
       createToken(): LocalHandle<Token> {
         return handle(new Token('round-trip'));
       },
-      returnToken(token: Token): Token {
-        // Return the same token back
-        return token;
+      returnToken(tokenHandle: LocalHandle<Token>): LocalHandle<Token> {
+        // Return the same handle back
+        return tokenHandle;
       },
-      checkSame(a: Token, b: Token): boolean {
-        return a === b;
+      checkSame(
+        a: LocalHandle<Token>,
+        b: LocalHandle<Token>,
+      ): boolean {
+        const tokenA = getHandleValue(a);
+        const tokenB = getHandleValue(b);
+        return tokenA === tokenB;
       },
     });
 
     const token1 = await ctx.remote.createToken();
-    const token2 = await ctx.remote.returnToken(token1 as unknown as Token);
-    
-    // Both should be the same handle on the local side
-    assert.strictEqual(token1, token2);
+    const token2 = await ctx.remote.returnToken(
+      token1 as unknown as LocalHandle<Token>,
+    );
 
-    // And the remote side should see them as the same token
+    // Both should be handles to the same token
     const result = await ctx.remote.checkSame(
-      token1 as unknown as Token,
-      token2 as unknown as Token,
+      token1 as unknown as LocalHandle<Token>,
+      token2 as unknown as LocalHandle<Token>,
     );
     assert.strictEqual(result, true);
+  });
+
+  void test('getHandleValue retrieves underlying value', async () => {
+    const token = new Token('test-id');
+    const tokenHandle = handle(token);
+
+    const retrieved = getHandleValue(tokenHandle);
+    assert.strictEqual(retrieved, token);
+    assert.strictEqual(retrieved.getId(), 'test-id');
   });
 });
 
@@ -115,7 +138,7 @@ void suite('handle() - nested mode', () => {
     await using ctx = await setupService(
       {
         processData(data: {name: string; token: LocalHandle<Token>}): string {
-          const token = data.token as unknown as Token;
+          const token = getHandleValue(data.token);
           return `${data.name}: ${token.getId()}`;
         },
       },
@@ -139,7 +162,8 @@ void suite('handle() - nested mode', () => {
             token: handle(new Token('return-token')),
           };
         },
-        validateToken(token: Token): string {
+        validateToken(tokenHandle: LocalHandle<Token>): string {
+          const token = getHandleValue(tokenHandle);
           return `Valid: ${token.getId()}`;
         },
       },
@@ -148,17 +172,19 @@ void suite('handle() - nested mode', () => {
 
     const data = await ctx.remote.getTokenData();
     assert.strictEqual(data.name, 'Result');
-    
-    // The token is opaque, but can be sent back
-    const result = await ctx.remote.validateToken(data.token as unknown as Token);
+
+    // The token handle can be sent back
+    const result = await ctx.remote.validateToken(
+      data.token as unknown as LocalHandle<Token>,
+    );
     assert.strictEqual(result, 'Valid: return-token');
   });
 
   void test('handle in array', async () => {
     await using ctx = await setupService(
       {
-        validateAllTokens(tokens: Array<Token>): Array<string> {
-          return tokens.map((token) => token.getId());
+        validateAllTokens(handles: Array<LocalHandle<Token>>): Array<string> {
+          return handles.map((h) => getHandleValue(h).getId());
         },
       },
       {nestedProxies: true},
@@ -171,7 +197,7 @@ void suite('handle() - nested mode', () => {
     ];
 
     const result = await ctx.remote.validateAllTokens(
-      tokens as unknown as Array<Token>,
+      tokens as unknown as Array<LocalHandle<Token>>,
     );
     assert.deepStrictEqual(result, ['token1', 'token2', 'token3']);
   });
@@ -183,7 +209,9 @@ void suite('handle() - nested mode', () => {
           a: LocalHandle<Token>;
           b: LocalHandle<Token>;
         }): boolean {
-          return data.a === data.b;
+          const tokenA = getHandleValue(data.a);
+          const tokenB = getHandleValue(data.b);
+          return tokenA === tokenB;
         },
       },
       {nestedProxies: true},

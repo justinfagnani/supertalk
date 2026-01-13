@@ -94,10 +94,9 @@ export type RemoteProxy<T> = {
 /**
  * A value marked as an opaque handle when sent across the wire.
  *
- * Use `handle(value)` to create a LocalHandle. Handles are similar to proxies
- * in terms of memory management and unwrapping, but don't provide any API on
- * the receiving side. A handle is only useful for receiving and sending back
- * to the remote side, or as a key representing the remote object.
+ * Use `handle(value)` to create a LocalHandle. Handles remain opaque on both
+ * the local and remote sides - they don't auto-unwrap. Use `getHandleValue()`
+ * to explicitly dereference a handle to get the underlying value.
  *
  * Handles are useful when you need consistent APIs in and out of workers but
  * don't need to access the object's properties or methods on the remote side.
@@ -105,18 +104,21 @@ export type RemoteProxy<T> = {
  * @example
  * ```ts
  * // Service implementation
- * const service = {
+ * class MyService {
  *   createToken(): LocalHandle<Token> {
  *     return handle(new Token());
  *   },
- *   useToken(token: Token): void {
- *     // token is unwrapped to the original Token instance
+ *   useToken(tokenHandle: LocalHandle<Token>): string {
+ *     // Explicitly dereference the handle
+ *     const token = getHandleValue(tokenHandle);
+ *     return token.getId();
  *   }
- * };
+ * }
  * ```
  */
 export interface LocalHandle<T> {
   readonly [LOCAL_HANDLE]: true;
+  /** @internal */
   readonly value: T;
 }
 
@@ -128,20 +130,19 @@ export interface LocalHandle<T> {
  *
  * This is what you receive when the other side sends a `LocalHandle<T>`.
  * It can only be used as an opaque reference to send back to the remote side.
+ * RemoteHandle and LocalHandle are compatible types for API consistency.
  *
  * @example
  * ```ts
  * // If service.createToken() returns LocalHandle<Token>,
- * // the caller receives RemoteHandle<Token>:
- * const token = await remote.createToken();
- * // token is opaque - no properties or methods accessible
- * await remote.useToken(token);  // But can be sent back
+ * // the caller receives RemoteHandle<Token> which is compatible with LocalHandle<Token>:
+ * const tokenHandle = await remote.createToken();
+ * // Handle is opaque - can't access properties
+ * // But can pass it to methods expecting LocalHandle<Token>
+ * await remote.useToken(tokenHandle);
  * ```
  */
-export type RemoteHandle<T> = {
-  readonly _brand: 'RemoteHandle';
-  readonly _type: T;
-};
+export type RemoteHandle<T> = LocalHandle<T>;
 
 // ============================================================
 // Remote service types
@@ -212,7 +213,7 @@ type RemotedArgs<T extends Array<unknown>> = {
  * Recursively transforms a type for remote access.
  *
  * - `LocalProxy<T>` → `RemoteProxy<T>` (explicit proxies)
- * - `LocalHandle<T>` → `RemoteHandle<T>` (opaque handles)
+ * - `LocalHandle<T>` → `LocalHandle<T>` (handles stay as handles for API consistency)
  * - Functions → async functions
  * - Arrays → recurse into elements
  * - Objects → recurse into properties
@@ -223,8 +224,8 @@ type RemotedArgs<T extends Array<unknown>> = {
  * // LocalProxy transforms to RemoteProxy
  * type T1 = Remoted<LocalProxy<Widget>>;  // RemoteProxy<Widget>
  *
- * // LocalHandle transforms to RemoteHandle
- * type T2 = Remoted<LocalHandle<Token>>;  // RemoteHandle<Token>
+ * // LocalHandle stays as LocalHandle for API consistency
+ * type T2 = Remoted<LocalHandle<Token>>;  // LocalHandle<Token>
  *
  * // Functions become async
  * type T3 = Remoted<() => number>;  // () => Promise<number>
@@ -237,7 +238,7 @@ export type Remoted<T> =
   T extends LocalProxy<infer U>
     ? RemoteProxy<U>
     : T extends LocalHandle<infer U>
-      ? RemoteHandle<U>
+      ? LocalHandle<U>
       : T extends AnyFunction
         ? (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>>>
         : T extends Array<infer U>

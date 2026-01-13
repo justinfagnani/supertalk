@@ -14,7 +14,7 @@ export {wrap} from './lib/wrap.js';
 export {Connection} from './lib/connection.js';
 
 // Proxy, handle, and transfer markers
-export {proxy, handle, transfer} from './lib/protocol.js';
+export {proxy, handle, getHandleValue, transfer} from './lib/protocol.js';
 export type {TransferMarker} from './lib/protocol.js';
 
 // Utilities

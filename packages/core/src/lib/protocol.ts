@@ -83,11 +83,15 @@ export function isLocalProxy(value: unknown): value is LocalProxy<unknown> {
  *
  * Use this to mark values that should be passed as opaque handles rather than
  * proxied or cloned. Handles work like proxies in terms of memory management
- * and unwrapping, but don't provide any API on the receiving side.
+ * and caching, but don't provide any API on the receiving side and don't
+ * auto-unwrap when passed around.
  *
  * A handle is only useful for receiving and sending back to the remote side,
  * or as a key representing the remote object. This enables consistent APIs
  * in and out of workers without exposing the full object interface.
+ *
+ * Use `getHandleValue()` to explicitly dereference a handle and access the
+ * underlying value on the side that created it.
  *
  * **When to use `handle()`:**
  * - **Opaque tokens** — Values used as keys or references
@@ -100,19 +104,47 @@ export function isLocalProxy(value: unknown): value is LocalProxy<unknown> {
  *
  * @example
  * ```ts
- * // Create an opaque token
- * createSession(): LocalHandle<Session> {
- *   return handle(new Session());  // Remote side gets opaque handle
- * }
+ * class MyService {
+ *   #sessions = new Map<string, Session>();
+ * 
+ *   createSession(id: string): LocalHandle<Session> {
+ *     const session = new Session(id);
+ *     this.#sessions.set(id, session);
+ *     return handle(session);
+ *   }
  *
- * // Use the handle
- * useSession(session: Session): void {
- *   // session is unwrapped to the original Session instance
+ *   getSessionName(sessionHandle: LocalHandle<Session>): string {
+ *     // Explicitly dereference the handle to access the session
+ *     const session = getHandleValue(sessionHandle);
+ *     return session.name;
+ *   }
  * }
+ * 
+ * // Works the same locally and remotely
+ * const sessionHandle = await service.createSession('abc');
+ * const name = await service.getSessionName(sessionHandle);
  * ```
  */
 export function handle<T>(value: T): LocalHandle<T> {
   return {[LOCAL_HANDLE]: true, value};
+}
+
+/**
+ * Get the underlying value from a LocalHandle.
+ *
+ * This can only be used on the side that created the handle. Attempting to
+ * dereference a RemoteHandle (received from the other side) will fail because
+ * RemoteHandle doesn't actually contain the value.
+ *
+ * @example
+ * ```ts
+ * const session = new Session();
+ * const sessionHandle = handle(session);
+ * const retrieved = getHandleValue(sessionHandle); // Returns the session
+ * ```
+ */
+export function getHandleValue<T>(handle: LocalHandle<T>): T {
+  return handle.value;
 }
 
 /**
