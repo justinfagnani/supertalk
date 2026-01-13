@@ -15,6 +15,7 @@ import type {
   Endpoint,
   Message,
   CallMessage,
+  ReleaseHandleMessage,
   WireValue,
   WireProxyProperty,
   WireThrown,
@@ -947,11 +948,11 @@ export class Connection {
         this.#releaseLocal(message.proxyId);
         break;
 
-      case 'release-handle':
-        this.#releaseHandleLocal(
-          (message as {type: 'release-handle'; handleId: number}).handleId,
-        );
+      case 'release-handle': {
+        const handleMessage = message as ReleaseHandleMessage;
+        this.#releaseHandleLocal(handleMessage.handleId);
         break;
+      }
 
       case 'promise-resolve': {
         const pending = this.#pendingRemotePromises.get(message.promiseId);

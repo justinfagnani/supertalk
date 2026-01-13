@@ -139,8 +139,8 @@ export interface LocalHandle<T> {
  * ```
  */
 export type RemoteHandle<T> = {
-  readonly __brand: 'RemoteHandle';
-  readonly __type: T;
+  readonly _brand: 'RemoteHandle';
+  readonly _type: T;
 };
 
 // ============================================================
