@@ -337,10 +337,11 @@ export class Connection {
     }
 
     // Decide whether to recurse into arrays/objects
-    const shouldRecurse =
-      this.#nestedProxies || this.#debug || this.#handlers.length > 0;
+    const shouldRecurse = this.#nestedProxies || this.#debug;
 
-    if (!shouldRecurse) return value;
+    if (!shouldRecurse) {
+      return value;
+    }
 
     if (Array.isArray(value)) {
       return value.map((item, i) =>
@@ -348,16 +349,25 @@ export class Connection {
       );
     }
 
-    // Recurse into object's own enumerable properties (same as structured clone)
-    const processed: Record<string, unknown> = {};
-    for (const key of Object.keys(value)) {
-      processed[key] = this.#processForClone(
-        (value as Record<string, unknown>)[key],
-        path ? `${path}.${key}` : key,
-        transfers,
-      );
+    // Only recurse into plain objects (prototype is Object.prototype or null).
+    // All other objects (Map, Set, Date, class instances, etc.) pass through
+    // for structured clone to handle natively.
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const proto = Object.getPrototypeOf(value);
+    if (proto === Object.prototype || proto === null) {
+      const processed: Record<string, unknown> = {};
+      for (const key of Object.keys(value)) {
+        processed[key] = this.#processForClone(
+          (value as Record<string, unknown>)[key],
+          path ? `${path}.${key}` : key,
+          transfers,
+        );
+      }
+      return processed;
     }
-    return processed;
+
+    return value;
   }
 
   // ============================================================
@@ -427,8 +437,8 @@ export class Connection {
       }
     }
 
-    // Only recurse if nestedProxies or handlers enabled
-    if (!this.#nestedProxies && this.#handlers.length === 0) {
+    // Only recurse if nestedProxies enabled
+    if (!this.#nestedProxies) {
       return value;
     }
 

@@ -564,4 +564,118 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
       // Phase 6 will make this work: await result.data === 42
     });
   });
+
+  void suite('class instances in nested proxy mode', () => {
+    // Class instances are not plain objects, so they are NOT recursively
+    // traversed. Instead, they pass through to structured clone.
+    // Structured clone silently drops the prototype and methods,
+    // resulting in a plain object on the receiving side.
+
+    void test('class instance without proxy() becomes empty object', async () => {
+      await using ctx = await setupService(
+        {
+          describeCounter(counter: Counter): string {
+            // The counter arrives as a plain object {}, not a Counter instance
+            const hasIncrement = 'increment' in counter;
+            const proto = Object.getPrototypeOf(counter);
+            return `hasIncrement=${hasIncrement}, proto=${proto?.constructor?.name ?? 'null'}`;
+          },
+        },
+        {nestedProxies: true},
+      );
+
+      // Passing a class instance without proxy() marker - structured clone
+      // silently converts it to a plain object, losing all methods
+      const result = await ctx.remote.describeCounter(
+        new Counter() as unknown as Counter,
+      );
+      // The instance becomes {} - no methods, plain Object prototype
+      assert.strictEqual(result, 'hasIncrement=false, proto=Object');
+    });
+
+    void test('class instance with proxy() marker works in nested proxy mode', async () => {
+      await using ctx = await setupService(
+        {
+          async useCounter(counter: AsyncProxy<Counter>): Promise<number> {
+            return await counter.increment();
+          },
+        },
+        {nestedProxies: true},
+      );
+
+      const counter = new Counter();
+      const result = await ctx.remote.useCounter(
+        proxy(counter) as unknown as AsyncProxy<Counter>,
+      );
+      assert.strictEqual(result, 1);
+    });
+
+    void test('nested class instance in object becomes empty object', async () => {
+      await using ctx = await setupService(
+        {
+          describeData(data: {name: string; counter: Counter}): string {
+            const hasIncrement = 'increment' in data.counter;
+            const proto = Object.getPrototypeOf(data.counter);
+            return `name=${data.name}, hasIncrement=${hasIncrement}, proto=${proto?.constructor?.name ?? 'null'}`;
+          },
+        },
+        {nestedProxies: true},
+      );
+
+      // Nested class instance also becomes a plain object
+      const result = await ctx.remote.describeData({
+        name: 'test',
+        counter: new Counter() as unknown as Counter,
+      });
+      assert.strictEqual(result, 'name=test, hasIncrement=false, proto=Object');
+    });
+
+    void test('nested class instance with proxy() marker works', async () => {
+      await using ctx = await setupService(
+        {
+          async processData(data: {
+            name: string;
+            counter: AsyncProxy<Counter>;
+          }): Promise<string> {
+            const val = await data.counter.increment();
+            return `${data.name}: ${val}`;
+          },
+        },
+        {nestedProxies: true},
+      );
+
+      const counter = new Counter();
+      const result = await ctx.remote.processData({
+        name: 'test',
+        counter: proxy(counter) as unknown as AsyncProxy<Counter>,
+      });
+      assert.strictEqual(result, 'test: 1');
+    });
+
+    void test('data-only class instances clone successfully', async () => {
+      // Classes that have no methods (only data) can be cloned,
+      // but they become plain objects on the other side
+      class Point {
+        x: number;
+        y: number;
+        constructor(x: number, y: number) {
+          this.x = x;
+          this.y = y;
+        }
+      }
+
+      await using ctx = await setupService(
+        {
+          sumPoint(point: Point): number {
+            // Note: point is a plain object on this side, not a Point instance
+            return point.x + point.y;
+          },
+        },
+        {nestedProxies: true},
+      );
+
+      const result = await ctx.remote.sumPoint(new Point(10, 20));
+      assert.strictEqual(result, 30);
+    });
+  });
 });
