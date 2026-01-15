@@ -89,9 +89,9 @@ interface ToWireContext {
   /**
    * Recursively process a nested value.
    * Applies handlers and default behavior, returns wire-safe value.
-   * @param key Optional key/index for error path building
+   * @param key Optional key for error path building (e.g., 'name', '0')
    */
-  toWire(value: unknown, key?: string | number): WireValue;
+  toWire(value: unknown, key?: string): WireValue;
 }
 ```
 
@@ -169,7 +169,7 @@ Handlers are NOT called for these (fast path):
 - **Primitives**: `null`, `undefined`, `boolean`, `number`, `string`, `bigint`, `symbol`
 - **Immutable built-ins**: `Date`, `RegExp` (structured clone handles these)
 - **Functions**: Always proxied (can't be cloned)
-- **Existing wire markers**: `LocalProxy`, proxy properties
+- **Existing wire markers**: `proxy()` markers, `handle()` markers, proxy properties
 
 Handlers ARE called for:
 
@@ -541,16 +541,17 @@ Should we validate this? Options:
                       #toWire()
 Local Value ──────────────────────────> Wire Value
      │                                       │
-     │  1. Check LocalProxy marker → proxy   │
-     │  2. Check function → proxy            │
-     │  3. Check primitive → pass-through    │
-     │  4. Check existing remote → proxy     │
-     │  5. Check promise → WirePromise       │
-     │  6. >>> Check handlers <<<            │
+     │  1. Check proxy() marker → proxy      │
+     │  2. Check handle() marker → handle    │
+     │  3. Check function → proxy            │
+     │  4. Check primitive → pass-through    │
+     │  5. Check existing remote → proxy     │
+     │  6. Check promise → WirePromise       │
+     │  7. >>> Check handlers <<<            │
      │     - canHandle()? → toWire()         │
      │     - Return handler's wire value     │
-     │  7. Array/plain object → traverse?    │
-     │  8. Class instance → proxy            │
+     │  8. Array/plain object → traverse?    │
+     │  9. Class instance → proxy            │
      │                                       │
      └───────────────────────────────────────┘
 
@@ -576,8 +577,8 @@ The context passed to handlers wraps Connection methods:
 ```typescript
 // Simplified — actual implementation is inline in Connection
 const toWireContext: ToWireContext = {
-  toWire(value: unknown, key?: string | number): WireValue {
-    const path = key !== undefined ? `${currentPath}.${key}` : currentPath;
+  toWire(value: unknown, key?: string): WireValue {
+    const path = key ? `${currentPath}.${key}` : currentPath;
     return connection.#toWire(value, path, transfers);
   },
 };

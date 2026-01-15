@@ -153,12 +153,35 @@ Unlike Comlink's global `transferHandlers` map, Supertalk has no global state. A
 - Mutable objects where the remote side should see updates
 - Large objects to avoid cloning overhead
 
-**Types are accurate:**
+**When to use `handle()`:**
+
+- Opaque tokens or session identifiers
+- References where you don't want to expose the object's interface
+- Graph nodes that should only be accessed on the owning side
+
+**Types are consistent on both sides:**
 
 ```ts
 interface MyService {
-  createWidget(): LocalProxy<Widget>; // → RemoteProxy<Widget>
-  getData(): {value: number}; // → { value: number } (cloned)
+  createWidget(): AsyncProxy<Widget>; // Same type on both sides
+  createSession(): Handle<Session>; // Same type on both sides
+  getData(): {value: number}; // Cloned, same shape
+}
+```
+
+Use `getProxyValue()` and `getHandleValue()` on the owning side to extract the
+underlying value. These throw on the remote side.
+
+### No Auto-Unwrapping
+
+Proxies and handles stay as proxies/handles when sent back across the boundary.
+This enables consistent bidirectional APIs:
+
+```ts
+// Service accepts the same types it returns
+interface MyService {
+  createWidget(): AsyncProxy<Widget>;
+  updateWidget(widget: AsyncProxy<Widget>): void;
 }
 ```
 
@@ -166,7 +189,7 @@ interface MyService {
 
 1. **Shallow mode (default, `nestedProxies: false`)**: Only top-level function arguments are proxied. No traversal. Maximum performance. Nested functions/promises fail with DataCloneError.
 
-2. **Debug mode (`debug: true`)**: Traverses payloads to detect non-cloneable values and throws `NonCloneableError` with the exact path. No actual proxying of nested values.
+2. **Debug mode (`debug: true`)**: Traverses payloads to detect non-cloneable values and throws `NonCloneableError` with the exact path. Detects nested functions, promises, `proxy()` markers, and `transfer()` markers that would fail without `nestedProxies: true`.
 
 3. **Nested mode (`nestedProxies: true`)**: Full payload traversal. Functions and promises are auto-proxied anywhere. Class instances require explicit `proxy()` markers.
 

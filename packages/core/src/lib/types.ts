@@ -11,7 +11,7 @@
  * @fileoverview Type definitions for the wire protocol.
  */
 
-import {WIRE_TYPE, type LOCAL_PROXY} from './constants.js';
+import {WIRE_TYPE, type PROXY_VALUE} from './constants.js';
 
 // ============================================================
 // Endpoint interface
@@ -37,55 +37,109 @@ export interface Endpoint {
 type AnyFunction = (...args: Array<any>) => any;
 
 // ============================================================
-// LocalProxy / RemoteProxy types
+// AsyncProxy type (unified local/remote proxy)
 // ============================================================
 
 /**
- * A value marked for proxying when sent across the wire.
+ * An async proxy to a value, usable on both sides of a connection.
  *
- * Use `proxy(value)` to create a LocalProxy. The wrapped value is accessible
- * via the `.value` property on the sending side.
+ * Use `proxy(value)` to create an AsyncProxy. On both the local and remote
+ * side, the proxy provides an async interface for property/method access.
  *
- * When received on the other side, it becomes a `RemoteProxy<T>` where all
- * property/method access is async.
+ * - Use `getProxyValue(proxy)` to get the underlying value on the owning side
+ * - The remote side can call methods and access properties asynchronously
+ * - AsyncProxies do NOT auto-unwrap when sent back — they stay as proxies
+ *
+ * The same `AsyncProxy<T>` type is used on both sides, enabling consistent
+ * APIs that work identically in and out of workers.
  *
  * @example
  * ```ts
  * // Service implementation
- * const service = {
- *   createWidget(): LocalProxy<Widget> {
+ * class MyService {
+ *   createWidget(): AsyncProxy<Widget> {
  *     return proxy(new Widget());
  *   }
- * };
+ *
+ *   updateWidget(widget: AsyncProxy<Widget>): void {
+ *     // Get the underlying value on the owning side
+ *     const w = getProxyValue(widget);
+ *     w.refresh();
+ *   }
+ * }
+ *
+ * // Client usage (same types locally and remotely)
+ * const widget = await service.createWidget();  // AsyncProxy<Widget>
+ * await widget.name;        // Property access is async
+ * await widget.activate();  // Method calls are async
+ * await service.updateWidget(widget);  // Pass proxy back
  * ```
  */
-export interface LocalProxy<T> {
-  readonly [LOCAL_PROXY]: true;
-  readonly value: T;
-}
+export type AsyncProxy<T> = {
+  /**
+   * Brand to identify proxy objects. Contains the underlying value on the
+   * owning side, undefined on the remote side.
+   * @internal - Use getProxyValue() to access the value
+   */
+  readonly [PROXY_VALUE]?: T;
+} & {
+  [K in keyof T]: T[K] extends AnyFunction
+    ? (...args: Parameters<T[K]>) => Promise<Awaited<Remoted<ReturnType<T[K]>>>>
+    : Promise<Awaited<Remoted<T[K]>>>;
+};
 
-// proxy() implementation is in protocol.ts
+// ============================================================
+// Handle type (opaque reference)
+// ============================================================
 
 /**
- * The remote representation of a proxied value.
- * All property and method access is async.
+ * An opaque handle to a value, usable on both sides of a connection.
  *
- * This is what you receive when the other side sends a `LocalProxy<T>`.
+ * Use `handle(value)` to create a Handle. Unlike refs, handles provide
+ * NO interface for accessing the underlying value remotely — they are
+ * completely opaque tokens.
+ *
+ * - Use `getHandleValue(handle)` to get the underlying value on the owning side
+ * - Handles are useful when you need consistent APIs but don't need remote access
+ * - Handles do NOT auto-unwrap when sent back — they stay as handles
+ *
+ * Handles are essentially refs without the async interface, useful for
+ * opaque tokens, session identifiers, or references to expensive objects.
  *
  * @example
  * ```ts
- * // If service.createWidget() returns LocalProxy<Widget>,
- * // the caller receives RemoteProxy<Widget>:
- * const widget = await remote.createWidget();
- * await widget.name;        // Property access is async
- * await widget.activate();  // Method calls are async
+ * // Service implementation
+ * class MyService {
+ *   createSession(id: string): Handle<Session> {
+ *     return handle(new Session(id));
+ *   }
+ *
+ *   getSessionName(session: Handle<Session>): string {
+ *     // Get the underlying value on the owning side
+ *     const s = getHandleValue(session);
+ *     return s.name;
+ *   }
+ * }
+ *
+ * // Client usage (same types locally and remotely)
+ * const session = await service.createSession('abc');  // Handle<Session>
+ * // session is opaque — can't access properties
+ * const name = await service.getSessionName(session);  // Pass handle back
  * ```
  */
-export type RemoteProxy<T> = {
-  [K in keyof T]: T[K] extends AnyFunction
-    ? (...args: Parameters<T[K]>) => Promise<Awaited<Remoted<ReturnType<T[K]>>>>
-    : Promise<Awaited<T[K]>>;
-};
+export interface Handle<T> {
+  /**
+   * Brand to identify handle objects. Contains the underlying value on the
+   * owning side, undefined on the remote side.
+   * @internal - Use getHandleValue() to access the value
+   */
+  readonly [PROXY_VALUE]?: T;
+  /**
+   * Discriminator to distinguish handles from refs at the type level.
+   * @internal
+   */
+  readonly __handle: true;
+}
 
 // ============================================================
 // Remote service types
@@ -104,7 +158,7 @@ export type RemoteProxy<T> = {
  * interface MyService {
  *   readonly count: number;
  *   add(a: number, b: number): number;
- *   createWidget(): LocalProxy<Widget>;
+ *   createWidget(): AsyncProxy<Widget>;
  *   getData(): { value: number };
  * }
  *
@@ -112,7 +166,7 @@ export type RemoteProxy<T> = {
  * // Remote<MyService> = {
  * //   count: Promise<number>;
  * //   add(a: number, b: number): Promise<number>;
- * //   createWidget(): Promise<RemoteProxy<Widget>>;
+ * //   createWidget(): Promise<AsyncProxy<Widget>>;
  * //   getData(): Promise<{ value: number }>;
  * // }
  * ```
@@ -124,38 +178,10 @@ export type Remote<T> = {
 };
 
 /**
- * Remote type for nested proxy mode.
- *
- * Like `Remote<T>`, but arguments also accept remoted versions (for round-trip
- * proxy handling where a proxy sent back gets unwrapped to the original).
- *
- * @example
- * ```ts
- * const remote = wrap<MyService>(worker, { nestedProxies: true });
- * // RemoteNested<MyService>
- * ```
- */
-export type RemoteNested<T> = {
-  [K in keyof T]: T[K] extends AnyFunction
-    ? (
-        ...args: RemotedArgs<Parameters<T[K]>>
-      ) => Promise<Awaited<Remoted<ReturnType<T[K]>>>>
-    : Promise<Awaited<Remoted<T[K]>>>;
-};
-
-/**
- * Transform argument types to accept either original or remoted versions.
- * This handles the round-trip case where a proxied object is passed back
- * and gets unwrapped to the original.
- */
-type RemotedArgs<T extends Array<unknown>> = {
-  [K in keyof T]: T[K] | Remoted<T[K]>;
-};
-
-/**
  * Recursively transforms a type for remote access.
  *
- * - `LocalProxy<T>` → `RemoteProxy<T>` (explicit proxies)
+ * - `AsyncProxy<T>` stays as `AsyncProxy<T>` (same type on both sides)
+ * - `Handle<T>` stays as `Handle<T>` (same type on both sides)
  * - Functions → async functions
  * - Arrays → recurse into elements
  * - Objects → recurse into properties
@@ -163,26 +189,31 @@ type RemotedArgs<T extends Array<unknown>> = {
  *
  * @example
  * ```ts
- * // LocalProxy transforms to RemoteProxy
- * type T1 = Remoted<LocalProxy<Widget>>;  // RemoteProxy<Widget>
+ * // AsyncProxy stays as AsyncProxy (consistent on both sides)
+ * type T1 = Remoted<AsyncProxy<Widget>>;  // AsyncProxy<Widget>
+ *
+ * // Handle stays as Handle (consistent on both sides)
+ * type T2 = Remoted<Handle<Token>>;  // Handle<Token>
  *
  * // Functions become async
- * type T2 = Remoted<() => number>;  // () => Promise<number>
+ * type T3 = Remoted<() => number>;  // () => Promise<number>
  *
  * // Objects recurse
- * type T3 = Remoted<{ fn: () => void }>;  // { fn: () => Promise<void> }
+ * type T4 = Remoted<{ fn: () => void }>;  // { fn: () => Promise<void> }
  * ```
  */
 export type Remoted<T> =
-  T extends LocalProxy<infer U>
-    ? RemoteProxy<U>
-    : T extends AnyFunction
-      ? (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>>>
-      : T extends Array<infer U>
-        ? Array<Remoted<U>>
-        : T extends object
-          ? {[K in keyof T]: Remoted<T[K]>}
-          : T;
+  T extends AsyncProxy<infer _U>
+    ? T // AsyncProxy stays as-is (same type on both sides)
+    : T extends Handle<infer _U>
+      ? T // Handle stays as-is (same type on both sides)
+      : T extends AnyFunction
+        ? (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>>>
+        : T extends Array<infer U>
+          ? Array<Remoted<U>>
+          : T extends object
+            ? {[K in keyof T]: Remoted<T[K]>}
+            : T;
 
 /**
  * Message types for the wire protocol.
@@ -238,19 +269,19 @@ export interface ThrowMessage {
 }
 
 /**
- * Release a proxy, allowing the source to garbage collect the target.
+ * Release a proxy or handle, allowing the source to garbage collect the target.
  */
 export interface ReleaseMessage {
   type: 'release';
-  proxyId: number;
+  id: number;
 }
 
 /**
  * Resolve a promise that was sent to the remote side.
  */
 export interface PromiseResolveMessage {
-  type: 'promise-resolve';
-  promiseId: number;
+  type: 'resolve';
+  id: number;
   value: WireValue;
 }
 
@@ -258,8 +289,8 @@ export interface PromiseResolveMessage {
  * Reject a promise that was sent to the remote side.
  */
 export interface PromiseRejectMessage {
-  type: 'promise-reject';
-  promiseId: number;
+  type: 'reject';
+  id: number;
   error: SerializedError;
 }
 
@@ -268,7 +299,7 @@ export interface PromiseRejectMessage {
  * Used for subscription updates, backpressure, releases, etc.
  */
 export interface HandlerMessage {
-  type: 'handler-message';
+  type: 'handler';
   /** Routes to the handler with matching wireType */
   wireType: string;
   /** Handler-defined payload, serialized through toWire/fromWire */
@@ -296,8 +327,8 @@ export interface Options {
    * will fail with `DataCloneError`. Maximum performance, predictable behavior.
    *
    * When `true` ("nested mode"): Full payload traversal on send and receive.
-   * Functions and promises are auto-proxied wherever found. `LocalProxy`
-   * markers created via `proxy()` are converted to wire proxies.
+   * Functions and promises are auto-proxied wherever found. Objects wrapped
+   * with `proxy()` are converted to wire proxies.
    *
    * @default false
    */
@@ -333,22 +364,6 @@ export interface Options {
 }
 
 /**
- * Options with nestedProxies explicitly set to true.
- * Used for function overloads that return RemoteNested<T>.
- */
-export interface NestedProxyOptions extends Options {
-  nestedProxies: true;
-}
-
-/**
- * Options with nestedProxies set to false or omitted (defaults to false).
- * Used for function overloads that return Remote<T>.
- */
-export interface ShallowOptions extends Options {
-  nestedProxies?: false;
-}
-
-/**
  * Wire format for values that may contain proxy references.
  *
  * Special values (proxies, promises, etc.) are branded with `__supertalk_type__`.
@@ -362,16 +377,18 @@ export type WireValue = unknown;
 
 export interface WireProxy {
   [WIRE_TYPE]: 'proxy';
-  proxyId: number;
+  id: number;
+  /** Opaque flag - proxy is a handle with no property access */
+  o: boolean;
 }
 
 export interface WirePromise {
   [WIRE_TYPE]: 'promise';
-  promiseId: number;
+  id: number;
 }
 
 export interface WireProxyProperty {
-  [WIRE_TYPE]: 'proxy-property';
+  [WIRE_TYPE]: 'property';
   targetProxyId: number;
   property: string;
 }
@@ -383,18 +400,15 @@ export interface WireThrown {
 
 // Type guards for wire values
 // Shared helper casts value to record after null/object check
-type WireRecord = Record<string, unknown>;
-const asWire = (v: unknown): WireRecord | undefined =>
-  typeof v === 'object' && v !== null ? (v as WireRecord) : undefined;
 
 export function isWireProxy(value: unknown): value is WireProxy {
-  const w = asWire(value);
-  return w?.[WIRE_TYPE] === 'proxy' && typeof w['proxyId'] === 'number';
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  return (value as WireProxy)?.[WIRE_TYPE] === 'proxy';
 }
 
 export function isWirePromise(value: unknown): value is WirePromise {
-  const w = asWire(value);
-  return w?.[WIRE_TYPE] === 'promise' && typeof w['promiseId'] === 'number';
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  return (value as WirePromise)?.[WIRE_TYPE] === 'promise';
 }
 
 /**
@@ -423,9 +437,9 @@ export interface ToWireContext {
    * Recursively convert a nested value to wire format.
    * Applies handlers and default behavior, returns wire-safe value.
    * @param value - The value to convert (may be wrapped with proxy()/transfer())
-   * @param key - Optional key/index for error path building (e.g., 'key', '0')
+   * @param key - Optional key for error path building (e.g., 'name', '0')
    */
-  toWire(value: unknown, key?: string | number): WireValue;
+  toWire(value: unknown, key?: string): WireValue;
 }
 
 /**

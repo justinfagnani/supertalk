@@ -20,6 +20,8 @@ The library aims to replace [Comlink](https://github.com/GoogleChromeLabs/comlin
 - **Clients get typed interfaces** — Full autocomplete and type checking for remote calls
 - **Servers get serialization guidance** — Type errors when returning non-serializable data
 - **No runtime surprises** — Types accurately reflect what can be sent/received
+- **Consistent APIs** — `AsyncProxy<T>` and `Handle<T>` work the same on both
+  sides, enabling bidirectional patterns with accurate types
 
 ### 2. Simple DX for Simple Cases
 
@@ -82,6 +84,9 @@ Easy proxying for values that can't or shouldn't be cloned:
 - **Expensive objects** — Reference large objects without cloning
 - **Graph nodes** — Reference nodes in a large graph structure
 - **Sub-services** — Return service instances from methods
+- **Opaque handles** — Pass references without exposing remote interface
+- **Round-trip safety** — Proxies and handles stay as proxies/handles when
+  passed back (no auto-unwrapping)
 
 ### 8. Signals Integration
 

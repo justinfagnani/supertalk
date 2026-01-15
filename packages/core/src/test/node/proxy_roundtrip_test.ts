@@ -7,8 +7,8 @@
 import {suite, test} from 'node:test';
 import * as assert from 'node:assert';
 import {setupService} from './test-utils.js';
-import {proxy} from '../../index.js';
-import type {LocalProxy} from '../../index.js';
+import {proxy, getProxyValue} from '../../index.js';
+import type {AsyncProxy} from '../../index.js';
 
 /**
  * Tests for proxy round-tripping behavior.
@@ -48,6 +48,7 @@ void suite('Proxy round-trip', () => {
       // back to the original function on the wrap side
       assert.ok(returnedCallback);
       // Remoted makes the callback return Promise<string>
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       const result = await returnedCallback();
       assert.strictEqual(result, 'hello from callback');
     });
@@ -77,7 +78,7 @@ void suite('Proxy round-trip', () => {
   void suite('Object proxies', () => {
     void test('proxied object returned back to caller maintains identity', async () => {
       // Track what objects were received
-      const receivedObjects: Array<object> = [];
+      const receivedObjects: Array<Handler> = [];
 
       class Handler {
         data = 'handler data';
@@ -89,12 +90,12 @@ void suite('Proxy round-trip', () => {
 
       await using ctx = await setupService(
         {
-          createHandler(): LocalProxy<Handler> {
+          createHandler(): AsyncProxy<Handler> {
             return proxy(new Handler());
           },
-          // When a RemoteProxy<Handler> is sent back, it's unwrapped to Handler
-          receiveHandler(handler: Handler | object): void {
-            receivedObjects.push(handler);
+          // Proxies don't auto-unwrap - use getProxyValue() to dereference
+          receiveHandler(handler: AsyncProxy<Handler>): void {
+            receivedObjects.push(getProxyValue(handler));
           },
         },
         {nestedProxies: true},
@@ -133,12 +134,13 @@ void suite('Proxy round-trip', () => {
 
       await using ctx = await setupService(
         {
-          getWrapper(): {inner: LocalProxy<Inner>} {
+          getWrapper(): {inner: AsyncProxy<Inner>} {
             // Use proxy() to explicitly mark the class instance
             return {inner: proxy(new Inner())};
           },
-          receiveInner(inner: Inner): void {
-            receivedInners.push(inner);
+          // Proxies don't auto-unwrap - use getProxyValue() to dereference
+          receiveInner(inner: AsyncProxy<Inner>): void {
+            receivedInners.push(getProxyValue(inner));
           },
         },
         {nestedProxies: true},
@@ -152,10 +154,8 @@ void suite('Proxy round-trip', () => {
       const value = await innerProxy.getValue();
       assert.strictEqual(value, 42);
 
-      // Send the inner proxy back - it will be unwrapped to the original Inner
-      // Cast needed because innerProxy is RemoteProxy<Inner> but the remote
-      // side expects Inner (the proxy gets unwrapped on round-trip)
-      await ctx.remote.receiveInner(innerProxy as unknown as Inner);
+      // Send the inner proxy back - now needs explicit dereference on receive
+      await ctx.remote.receiveInner(innerProxy);
 
       // Should receive the original Inner instance
       assert.strictEqual(receivedInners.length, 1);
@@ -196,14 +196,14 @@ void suite('Proxy round-trip', () => {
         }
       }
 
-      let capturedCallback: (() => LocalProxy<Result>) | undefined;
+      let capturedCallback: (() => AsyncProxy<Result>) | undefined;
 
       await using ctx = await setupService(
         {
-          setCallback(cb: () => LocalProxy<Result>): void {
+          setCallback(cb: () => AsyncProxy<Result>): void {
             capturedCallback = cb;
           },
-          invokeCallback(): LocalProxy<Result> | undefined {
+          invokeCallback(): AsyncProxy<Result> | undefined {
             return capturedCallback?.();
           },
         },
