@@ -1,5 +1,12 @@
 # @supertalk/signals
 
+## 0.0.3
+
+### Patch Changes
+
+- Updated dependencies [e9bc8f6]
+  - @supertalk/core@0.0.3
+
 ## 0.0.2
 
 ### Patch Changes
