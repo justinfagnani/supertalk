@@ -94,9 +94,33 @@ A `Remote<T>` is a proxy type that represents a remote service:
 type Remote<T> = {
   [K in keyof T]: T[K] extends (...args: infer A) => infer R
     ? (...args: A) => Promise<Awaited<R>>
-    : never;
+    : Promise<T[K]>;
 };
 ```
+
+### AsyncProxy
+
+An `AsyncProxy<T>` is a unified proxy type for objects marked with `proxy()`.
+It provides an async interface on both sides of the connection:
+
+```typescript
+type AsyncProxy<T> = {
+  [K in keyof T]: T[K] extends (...args: infer A) => infer R
+    ? (...args: A) => Promise<Awaited<R>>
+    : Promise<T[K]>;
+};
+```
+
+The owning side can extract the underlying value with `getProxyValue()`. The
+remote side can call methods and access properties asynchronously.
+
+### Handle
+
+A `Handle<T>` is an opaque reference type for objects marked with `handle()`.
+Unlike proxies, handles provide no remote interface — they're pure tokens.
+
+The owning side can extract the underlying value with `getHandleValue()`. The
+remote side can only pass the handle around.
 
 ---
 
@@ -130,7 +154,7 @@ This handshake:
 
 ```typescript
 // expose() sends immediately after setup:
-{ type: 'return', id: 0, value: { __supertalk_type__: 'proxy', proxyId: 0 } }
+{ type: 'return', id: 0, value: { __supertalk_type__: 'proxy', id: 0 } }
 
 // Or on error:
 { type: 'throw', id: 0, error: { name: 'Error', message: '...' } }

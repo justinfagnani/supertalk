@@ -10,9 +10,9 @@
 import {suite, test} from 'node:test';
 import * as assert from 'node:assert';
 import {setupService} from './test-utils.js';
-import type {RemoteProxy, LocalProxy} from '../../index.js';
+import type {AsyncProxy} from '../../index.js';
 import {MessageChannel} from 'node:worker_threads';
-import {expose, wrap, proxy} from '../../index.js';
+import {expose, wrap, proxy, getProxyValue} from '../../index.js';
 
 class Counter {
   #count = 0;
@@ -39,7 +39,7 @@ class Counter {
 class Database {
   #collections = new Map<string, Collection>();
 
-  collection(name: string): LocalProxy<Collection> {
+  collection(name: string): AsyncProxy<Collection> {
     let coll = this.#collections.get(name);
     if (!coll) {
       coll = new Collection(name);
@@ -78,7 +78,7 @@ void suite('class instance proxying', () => {
   void suite('basic class instances', () => {
     void test('returned class instance is proxied', async () => {
       await using ctx = await setupService({
-        createCounter(name: string): LocalProxy<Counter> {
+        createCounter(name: string): AsyncProxy<Counter> {
           return proxy(new Counter(name));
         },
       });
@@ -92,7 +92,7 @@ void suite('class instance proxying', () => {
 
     void test('class instance methods maintain state', async () => {
       await using ctx = await setupService({
-        createCounter(name: string, initial: number): LocalProxy<Counter> {
+        createCounter(name: string, initial: number): AsyncProxy<Counter> {
           return proxy(new Counter(name, initial));
         },
       });
@@ -107,46 +107,46 @@ void suite('class instance proxying', () => {
 
     void test('class instance property access', async () => {
       await using ctx = await setupService({
-        createCounter(name: string): LocalProxy<Counter> {
+        createCounter(name: string): AsyncProxy<Counter> {
           return proxy(new Counter(name));
         },
       });
 
       // Remoted<Counter> makes methods async, but properties stay as-is
-      // For property access on proxied classes, use RemoteProxy<T>
+      // For property access on proxied classes, use AsyncProxy<T>
       const counter = (await ctx.remote.createCounter(
         'myCounter',
-      )) as unknown as RemoteProxy<Counter>;
+      )) as unknown as AsyncProxy<Counter>;
       // Now property access is correctly typed as Promise<string>
       assert.strictEqual(await counter.name, 'myCounter');
     });
 
     void test('class instance getter access', async () => {
       await using ctx = await setupService({
-        createCounter(name: string, initial: number): LocalProxy<Counter> {
+        createCounter(name: string, initial: number): AsyncProxy<Counter> {
           return proxy(new Counter(name, initial));
         },
       });
 
-      // RemoteProxy<T> makes both methods and properties async
+      // AsyncProxy<T> makes both methods and properties async
       const counter = (await ctx.remote.createCounter(
         'test',
         42,
-      )) as unknown as RemoteProxy<Counter>;
+      )) as unknown as AsyncProxy<Counter>;
       // Getter access is correctly typed as Promise<number>
       assert.strictEqual(await counter.count, 42);
     });
 
     void test('class instance property setting', async () => {
       await using ctx = await setupService({
-        createCounter(name: string): LocalProxy<Counter> {
+        createCounter(name: string): AsyncProxy<Counter> {
           return proxy(new Counter(name));
         },
       });
 
       const counter = (await ctx.remote.createCounter(
         'original',
-      )) as unknown as RemoteProxy<Counter>;
+      )) as unknown as AsyncProxy<Counter>;
 
       // Verify initial value
       assert.strictEqual(await counter.name, 'original');
@@ -162,13 +162,13 @@ void suite('class instance proxying', () => {
   void suite('chained method calls', () => {
     void test('method returning another class instance', async () => {
       await using ctx = await setupService({
-        getDatabase(): LocalProxy<Database> {
+        getDatabase(): AsyncProxy<Database> {
           return proxy(new Database());
         },
       });
 
-      // getDatabase returns RemoteProxy<Database>
-      // db.collection() returns Promise<RemoteProxy<Collection>>
+      // getDatabase returns AsyncProxy<Database>
+      // db.collection() returns Promise<Proxy<Collection>>
       const db = await ctx.remote.getDatabase();
       const users = await db.collection('users');
       await users.insert('1', {name: 'Alice'});
@@ -180,15 +180,15 @@ void suite('class instance proxying', () => {
 
     void test('deeply nested class instances', async () => {
       await using ctx = await setupService({
-        getDatabase(): LocalProxy<Database> {
+        getDatabase(): AsyncProxy<Database> {
           return proxy(new Database());
         },
       });
 
       const db = await ctx.remote.getDatabase();
       const posts = await db.collection('posts');
-      // Property access on proxied class needs RemoteProxy<T>
-      const proxiedPosts = posts as unknown as RemoteProxy<Collection>;
+      // Property access on proxied class needs AsyncProxy<T>
+      const proxiedPosts = posts as unknown as AsyncProxy<Collection>;
       assert.strictEqual(await proxiedPosts.name, 'posts');
     });
   });
@@ -198,7 +198,7 @@ void suite('class instance proxying', () => {
       const sharedCounter = new Counter('shared', 100);
 
       await using ctx = await setupService({
-        getCounter(): LocalProxy<Counter> {
+        getCounter(): AsyncProxy<Counter> {
           return proxy(sharedCounter);
         },
       });
@@ -222,13 +222,13 @@ void suite('class instance proxying', () => {
     void test('proxy() marks values for explicit proxying', async () => {
       // Define a service that uses proxy() for explicit type-safe proxying
       interface MyService {
-        createCounter(name: string): LocalProxy<Counter>;
+        createCounter(name: string): AsyncProxy<Counter>;
         getData(): {value: number};
       }
 
       // Implementation uses proxy() to mark class instances
       const service: MyService = {
-        createCounter(name: string): LocalProxy<Counter> {
+        createCounter(name: string): AsyncProxy<Counter> {
           return proxy(new Counter(name, 10));
         },
         getData(): {value: number} {
@@ -240,12 +240,12 @@ void suite('class instance proxying', () => {
       expose(service, port1);
 
       // wrap() returns Remote<MyService> which transforms:
-      // - LocalProxy<Counter> → RemoteProxy<Counter> (all access async)
+      // - AsyncProxy<Counter> → AsyncProxy<Counter> (all access async)
       // - {value: number} → {value: number} (plain object, cloned)
       const remote = await wrap<MyService>(port2);
 
       try {
-        // Counter is explicitly proxied via proxy() - RemoteProxy<Counter>
+        // Counter is explicitly proxied via proxy() - AsyncProxy<Counter>
         const counter = await remote.createCounter('test');
         // Properties are typed as Promise<T>
         assert.strictEqual(await counter.name, 'test');
@@ -262,14 +262,15 @@ void suite('class instance proxying', () => {
       }
     });
 
-    void test('proxy() value property gives access to wrapped object', () => {
+    void test('getProxyValue() gives access to wrapped object on owning side', () => {
       const counter = new Counter('test', 5);
       const wrapped = proxy(counter);
 
-      // LocalProxy has a .value property to access the underlying object
-      assert.strictEqual(wrapped.value.name, 'test');
-      assert.strictEqual(wrapped.value.increment(), 6);
-      assert.strictEqual(wrapped.value.count, 6);
+      // Use getProxyValue() to access the underlying object on owning side
+      const value = getProxyValue(wrapped);
+      assert.strictEqual(value.name, 'test');
+      assert.strictEqual(value.increment(), 6);
+      assert.strictEqual(value.count, 6);
     });
 
     void test('plain objects vs proxied objects have different types', async () => {
@@ -284,13 +285,13 @@ void suite('class instance proxying', () => {
       // Service with clearly typed returns
       interface MyService {
         // Returns a proxied class instance
-        createCounter(name: string): LocalProxy<Counter>;
+        createCounter(name: string): AsyncProxy<Counter>;
         // Returns plain data (cloned)
         getWidgetData(): WidgetData;
       }
 
       const service: MyService = {
-        createCounter(name: string): LocalProxy<Counter> {
+        createCounter(name: string): AsyncProxy<Counter> {
           return proxy(new Counter(name, 10));
         },
         getWidgetData(): WidgetData {
@@ -304,7 +305,7 @@ void suite('class instance proxying', () => {
       const remote = await wrap<MyService>(port2);
 
       try {
-        // Counter is proxied - RemoteProxy<Counter>
+        // Counter is proxied - AsyncProxy<Counter>
         const counter = await remote.createCounter('test');
         assert.strictEqual(await counter.name, 'test');
 

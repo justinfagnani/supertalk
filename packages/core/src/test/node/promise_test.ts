@@ -199,7 +199,7 @@ void suite('Promise support', () => {
         async () => ctx.remote.getData(),
         (error: Error) => {
           assert.ok(error.name === 'NonCloneableError');
-          assert.ok(error.message.includes('Promise'));
+          assert.ok(error.message.includes('promise'));
           assert.ok(error.message.includes('value'));
           return true;
         },

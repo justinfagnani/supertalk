@@ -14,7 +14,13 @@ export {wrap} from './lib/wrap.js';
 export {Connection} from './lib/connection.js';
 
 // Proxy, handle, and transfer markers
-export {proxy, handle, getHandleValue, transfer} from './lib/protocol.js';
+export {
+  proxy,
+  getProxyValue,
+  handle,
+  getHandleValue,
+  transfer,
+} from './lib/protocol.js';
 export type {TransferMarker} from './lib/protocol.js';
 
 // Utilities
@@ -24,20 +30,14 @@ export {NonCloneableError} from './lib/protocol.js';
 export type {
   Endpoint,
   Remote,
-  RemoteNested,
   Remoted,
-  LocalProxy,
-  RemoteProxy,
-  LocalHandle,
-  RemoteHandle,
+  AsyncProxy,
+  Handle,
   Message,
   WireValue,
   WireProxy,
-  WireHandle,
   WirePromise,
   Options,
-  NestedProxyOptions,
-  ShallowOptions,
   Handler,
   ToWireContext,
   FromWireContext,

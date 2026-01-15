@@ -4,20 +4,14 @@
 
 import {MessageChannel, type MessagePort} from 'node:worker_threads';
 import {expose, wrap} from '../../index.js';
-import type {
-  Remote,
-  RemoteNested,
-  Options,
-  NestedProxyOptions,
-  ShallowOptions,
-} from '../../index.js';
+import type {Remote, Options} from '../../index.js';
 
 /**
  * A disposable test context that sets up a service and remote proxy over a MessageChannel.
  */
-export interface ServiceContext<R> {
+export interface ServiceContext<T> {
   /** The wrapped remote proxy for calling the service */
-  remote: R;
+  remote: Remote<T>;
   /** The underlying ports (exposed for advanced use cases) */
   port1: MessagePort;
   port2: MessagePort;
@@ -38,18 +32,10 @@ export interface ServiceContext<R> {
  * // ports are automatically closed when ctx goes out of scope
  * ```
  */
-export function setupService<T extends object>(
-  service: T,
-  options: NestedProxyOptions,
-): Promise<ServiceContext<RemoteNested<T>>>;
-export function setupService<T extends object>(
-  service: T,
-  options?: ShallowOptions,
-): Promise<ServiceContext<Remote<T>>>;
 export async function setupService<T extends object>(
   service: T,
   options: Options = {},
-): Promise<ServiceContext<Remote<T> | RemoteNested<T>>> {
+): Promise<ServiceContext<T>> {
   const {port1, port2} = new MessageChannel();
 
   expose(service, port1, options);

@@ -111,6 +111,7 @@ void suite('function proxying', () => {
       // Top-level returned functions are proxied (become async)
       // Remote<T> correctly types this as () => Promise<number>
       const double = await ctx.remote.getMultiplier(2);
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       const result = await double(21);
       assert.strictEqual(result, 42);
     });
@@ -126,8 +127,11 @@ void suite('function proxying', () => {
       // Top-level returned functions are proxied (become async)
       const counter = await ctx.remote.createCounter();
 
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       assert.strictEqual(await counter(), 1);
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       assert.strictEqual(await counter(), 2);
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       assert.strictEqual(await counter(), 3);
     });
   });
@@ -181,6 +185,7 @@ void suite('function proxying', () => {
       // Name is cloned (data)
       assert.strictEqual(widget.name, 'Button');
       // activate is proxied (function) - RemoteNested transforms it to async
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       assert.strictEqual(await widget.activate(), 'Button activated!');
     });
   });
@@ -237,8 +242,11 @@ void suite('function proxying', () => {
       assert.ok(double);
       assert.ok(square);
 
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       assert.strictEqual(await addOne(5), 6); // 5 + 1
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       assert.strictEqual(await double(5), 10); // 5 * 2
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       assert.strictEqual(await square(5), 25); // 5 ** 2
     });
   });

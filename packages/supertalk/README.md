@@ -12,7 +12,7 @@ Supertalk is built to be a joy to use and deploy:
 - **Type-safe:** Your IDE knows exactly what's proxied vs cloned
 - **Ergonomic:** Callbacks, promises, and classes just work
 - **Bidirectional:** The same types and patterns work in both directions
-- **Fast & small:** ~2.3 kB brotli-compressed, zero dependencies
+- **Fast & small:** ~2.4 kB brotli-compressed, zero dependencies
 - **Composable & extendable:** Non-global configuration, nested objects,
   services are just classes, composable transport handlers
 - **Standard modules:** ESM-only, no CommonJS
@@ -156,9 +156,75 @@ expose(
 const service = await wrap(worker);
 const widget = await service.createWidget();
 
-// Instance and prototype APIs are available asynchronously
+// The proxy provides async access to properties and methods
 const count = await widget.count;
 const hello = await widget.sayHello();
+```
+
+### Opaque Handles with `handle()`
+
+When you need to pass a reference without exposing any remote interface, use
+`handle()`. Handles are opaque tokens — they can be passed around and back, but
+provide no way to access properties or methods remotely.
+
+```ts
+import {expose, handle, getHandleValue, type Handle} from 'supertalk';
+
+class Session {
+  constructor(public id: string) {}
+}
+
+const service = {
+  createSession(id: string) {
+    return handle(new Session(id)); // Opaque handle
+  },
+  getSessionId(session: Handle<Session>) {
+    // Extract the value on the owning side
+    return getHandleValue(session).id;
+  },
+};
+```
+
+```ts
+// Client side
+const session = await remote.createSession('abc'); // Handle<Session>
+// session is opaque — no property access
+const id = await remote.getSessionId(session); // Pass it back
+```
+
+### Extracting Values from Proxies and Handles
+
+Both `proxy()` and `handle()` create wrappers that work the same on both sides.
+On the side that created the proxy/handle, you can extract the underlying value:
+
+```ts
+import {
+  proxy,
+  getProxyValue,
+  handle,
+  getHandleValue,
+  type AsyncProxy,
+  type Handle,
+} from 'supertalk';
+
+const service = {
+  // Return a proxied widget
+  createWidget() {
+    return proxy(new Widget());
+  },
+
+  // Accept a proxy and extract its value
+  updateWidget(widget: AsyncProxy<Widget>) {
+    const w = getProxyValue(widget); // Only works on owning side
+    w.refresh();
+  },
+
+  // Same pattern works for handles
+  processSession(session: Handle<Session>) {
+    const s = getHandleValue(session);
+    return s.data;
+  },
+};
 ```
 
 ### Nested Objects & Proxies
@@ -210,19 +276,23 @@ const service = {
 
 When values cross the communication boundary:
 
-| Value Type                                       | Shallow Mode | Nested Mode |
-| ------------------------------------------------ | ------------ | ----------- |
-| Primitives                                       | ✅ Cloned    | ✅ Cloned   |
-| Plain objects `{...}`                            | ✅ Cloned    | ✅ Cloned   |
-| Arrays                                           | ✅ Cloned    | ✅ Cloned   |
-| Functions (top-level)                            | 🛜 Proxied   | 🛜 Proxied  |
-| Functions (nested)                               | ❌ Error     | 🛜 Proxied  |
-| Promises (top-level return)                      | 🛜 Proxied   | 🛜 Proxied  |
-| Promises (nested)                                | ❌ Error     | 🛜 Proxied  |
-| `proxy()` wrapped values                         | 🛜 Proxied   | 🛜 Proxied  |
-| `proxy()` wrapped values (nested)                | ❌ Error     | 🛜 Proxied  |
-| Class instances & objects with custom prototypes | ⚠️ Cloned\*  | ⚠️ Cloned\* |
-| Other structured cloneable objects               | ✅ Cloned    | ✅ Cloned   |
+| Value Type                                       | Shallow Mode   | Nested Mode    |
+| ------------------------------------------------ | -------------- | -------------- |
+| Primitives                                       | ✅ Cloned      | ✅ Cloned      |
+| Plain objects `{...}`                            | ✅ Cloned      | ✅ Cloned      |
+| Arrays                                           | ✅ Cloned      | ✅ Cloned      |
+| Functions (top-level)                            | 🛜 Proxied     | 🛜 Proxied     |
+| Functions (nested)                               | ❌ Error       | 🛜 Proxied     |
+| Promises (top-level return)                      | 🛜 Proxied     | 🛜 Proxied     |
+| Promises (nested)                                | ❌ Error       | 🛜 Proxied     |
+| `proxy()` wrapped values (top-level)             | 🛜 Proxied     | 🛜 Proxied     |
+| `proxy()` wrapped values (nested)                | ❌ Error       | 🛜 Proxied     |
+| `handle()` wrapped values (top-level)            | 🔒 Handle      | 🔒 Handle      |
+| `handle()` wrapped values (nested)               | ❌ Error       | 🔒 Handle      |
+| `transfer()` wrapped values (top-level)          | 📦 Transferred | 📦 Transferred |
+| `transfer()` wrapped values (nested)             | ❌ Error       | 📦 Transferred |
+| Class instances & objects with custom prototypes | ⚠️ Cloned\*    | ⚠️ Cloned\*    |
+| Other structured cloneable objects               | ✅ Cloned      | ✅ Cloned      |
 
 \* _Class instances are cloned via structured clone (losing methods) unless
 wrapped in `proxy()`._
@@ -249,11 +319,26 @@ Connects to an exposed service and returns a proxy.
 
 #### `proxy(value)`
 
-Marks an object to be proxied rather than cloned. Use this for:
+Marks an object to be proxied rather than cloned. Returns an `AsyncProxy<T>`
+that provides async access on both sides. Use this for:
 
 - Class instances with methods
 - Mutable objects that should be shared
 - Large objects to avoid cloning costs
+
+#### `handle(value)`
+
+Marks an object as an opaque handle. Returns a `Handle<T>` that can be passed
+around but provides no remote interface. Use this for:
+
+- Session tokens or identifiers
+- References to expensive objects
+- Graph nodes where you don't want to expose internals
+
+#### `getProxyValue(proxy)` / `getHandleValue(handle)`
+
+Extracts the underlying value from an `AsyncProxy` or `Handle`. Only works on
+the side that created the proxy/handle — throws `TypeError` on the remote side.
 
 #### `transfer(value, transferables?)`
 
@@ -269,7 +354,12 @@ Marks a value to be transferred (zero-copy) rather than cloned.
 interface Options {
   /** Enable nested proxy handling (default: false) */
   nestedProxies?: boolean;
-  /** Enable debug mode for better error messages */
+  /**
+   * Enable debug mode for better error messages.
+   * Throws NonCloneableError with the exact path for nested functions,
+   * promises, proxy() markers, and transfer() markers that would fail
+   * without nestedProxies: true.
+   */
   debug?: boolean;
   /** Custom handlers for serializing/deserializing specific types */
   handlers?: Array<Handler>;
@@ -296,24 +386,48 @@ domain objects. See `Handler`, `ToWireContext`, and `FromWireContext` types.
 
 #### `Remote<T>`
 
-The primary type for service proxies. Transforms all methods to async.
+The primary type for service proxies returned by `wrap()`. Transforms all
+methods to async and properties to `Promise<T>`.
 
 ```ts
 const remote = await wrap<MyService>(worker);
 // remote has type Remote<MyService>
 ```
 
-#### `RemoteProxy<T>`
+#### `AsyncProxy<T>`
 
-What you receive when the other side sends a `LocalProxy<T>`. All property and
-method access becomes async.
+The unified proxy type returned by `proxy()`. Works the same on both sides of a
+connection — the remote side gets async access to properties and methods, while
+the owning side can extract the underlying value with `getProxyValue()`.
 
 ```ts
-// RemoteProxy<Counter>:
-// {
-//   count: Promise<number>;
-//   increment: () => Promise<number>;
-// }
+// Service returns an AsyncProxy
+createWidget(): AsyncProxy<Widget> {
+  return proxy(new Widget());
+}
+
+// Client receives the same type
+const widget = await remote.createWidget(); // AsyncProxy<Widget>
+await widget.name;       // Property access is async
+await widget.activate(); // Method calls are async
+```
+
+#### `Handle<T>`
+
+An opaque reference type returned by `handle()`. Provides no remote interface —
+useful for session tokens, expensive objects, or graph nodes that shouldn't
+expose their internals.
+
+```ts
+// Service returns a Handle
+createSession(): Handle<Session> {
+  return handle(new Session());
+}
+
+// Client can only pass it back
+const session = await remote.createSession(); // Handle<Session>
+// session.foo — not allowed, handles are opaque
+await remote.useSession(session); // Pass it back
 ```
 
 ## Advanced Usage

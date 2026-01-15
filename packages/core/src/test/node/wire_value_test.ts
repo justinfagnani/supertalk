@@ -17,12 +17,12 @@ void suite('wire value edge cases', () => {
     });
 
     // Object that looks like a wire value with type: 'proxy'
-    const maliciousProxy = {type: 'proxy', proxyId: 999};
+    const maliciousProxy = {type: 'proxy', id: 999};
     const result1 = await ctx.remote.echo(maliciousProxy);
     assert.deepStrictEqual(result1, maliciousProxy);
 
     // Object that looks like a wire value with type: 'promise'
-    const maliciousPromise = {type: 'promise', promiseId: 999};
+    const maliciousPromise = {type: 'promise', id: 999};
     const result2 = await ctx.remote.echo(maliciousPromise);
     assert.deepStrictEqual(result2, maliciousPromise);
 
@@ -39,9 +39,9 @@ void suite('wire value edge cases', () => {
     const result4 = await ctx.remote.echo(maliciousThrown);
     assert.deepStrictEqual(result4, maliciousThrown);
 
-    // Object that looks like a wire value with type: 'proxy-property'
+    // Object that looks like a wire value with type: 'property'
     const maliciousProxyProp = {
-      type: 'proxy-property',
+      type: 'property',
       targetProxyId: 999,
       property: 'foo',
     };
@@ -68,7 +68,7 @@ void suite('wire value edge cases', () => {
     // Has the type but wrong payload property name
     const fakePromiseMarker = {
       __supertalk_type__: 'promise',
-      __supertalk_promise_id__: 999, // wrong property name (should be promiseId)
+      __supertalk_id__: 999, // wrong property name (should be id)
     };
     const result2 = await ctx.remote.echo(fakePromiseMarker);
     assert.deepStrictEqual(result2, fakePromiseMarker);
@@ -93,8 +93,8 @@ void suite('wire value edge cases', () => {
     // Nested objects with type properties
     const nested = {
       items: [
-        {type: 'proxy', proxyId: 1},
-        {type: 'promise', promiseId: 2},
+        {type: 'proxy', id: 1},
+        {type: 'promise', id: 2},
       ],
       child: {
         type: 'raw',

@@ -19,7 +19,7 @@ import {suite, test} from 'node:test';
 import * as assert from 'node:assert';
 import {setupService} from './test-utils.js';
 import {NonCloneableError, proxy} from '../../index.js';
-import type {Remoted, LocalProxy} from '../../index.js';
+import type {Remoted, AsyncProxy} from '../../index.js';
 
 // A class instance for testing (not a plain object)
 class Counter {
@@ -57,6 +57,7 @@ void suite('manual mode (nestedProxies: false)', () => {
       // Remote<T> uses Remoted<R> for return types, so greeter is correctly
       // typed as () => Promise<string>
       const greeter = await ctx.remote.getGreeter();
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       const result = await greeter();
       assert.strictEqual(result, 'hello from remote');
     });
@@ -69,8 +70,9 @@ void suite('manual mode (nestedProxies: false)', () => {
         // a proxy, not the original counter.
         async useCounter(counter: Remoted<Counter>): Promise<number> {
           // The counter here is a proxy to the local Counter instance
+          // eslint-disable-next-line @typescript-eslint/await-thenable
           await counter.increment();
-          return counter.increment();
+          return counter.increment() as unknown as number;
         },
       });
 
@@ -86,7 +88,7 @@ void suite('manual mode (nestedProxies: false)', () => {
 
     void test('top-level class instance return value is proxied with proxy()', async () => {
       await using ctx = await setupService({
-        createCounter(): LocalProxy<Counter> {
+        createCounter(): AsyncProxy<Counter> {
           return proxy(new Counter());
         },
       });
@@ -192,29 +194,6 @@ void suite('manual mode (nestedProxies: false)', () => {
       );
     });
 
-    void test('nested class instance in object argument throws', async () => {
-      await using ctx = await setupService(
-        {
-          processWithCounter(opts: {counter: Counter}): number {
-            return opts.counter.increment();
-          },
-        },
-        {debug: true},
-      );
-
-      await assert.rejects(
-        async () => {
-          await ctx.remote.processWithCounter({counter: new Counter()});
-        },
-        (error: Error) => {
-          assert.ok(error instanceof NonCloneableError);
-          assert.strictEqual(error.valueType, 'class-instance');
-          assert.strictEqual(error.path, 'counter');
-          return true;
-        },
-      );
-    });
-
     void test('nested function in return value throws', async () => {
       await using ctx = await setupService(
         {
@@ -287,6 +266,97 @@ void suite('manual mode (nestedProxies: false)', () => {
       );
     });
   });
+
+  void suite('nested markers throw in debug mode', () => {
+    void test('nested proxy() marker throws', async () => {
+      await using ctx = await setupService(
+        {
+          processData(data: {widget: AsyncProxy<Counter>}): void {
+            // Would access the proxied widget
+            void data.widget;
+          },
+        },
+        {debug: true},
+      );
+
+      await assert.rejects(
+        async () => {
+          await ctx.remote.processData({
+            widget: proxy(new Counter()),
+          });
+        },
+        (error: Error) => {
+          assert.ok(error instanceof NonCloneableError);
+          assert.strictEqual(error.valueType, 'proxy');
+          assert.strictEqual(error.path, 'widget');
+          return true;
+        },
+      );
+    });
+
+    void test('nested transfer() marker throws', async () => {
+      const {transfer} = await import('../../index.js');
+
+      await using ctx = await setupService(
+        {
+          processData(data: {buffer: ArrayBuffer}): number {
+            return data.buffer.byteLength;
+          },
+        },
+        {debug: true},
+      );
+
+      await assert.rejects(
+        async () => {
+          await ctx.remote.processData({
+            buffer: transfer(new ArrayBuffer(1024)) as unknown as ArrayBuffer,
+          });
+        },
+        (error: Error) => {
+          assert.ok(error instanceof NonCloneableError);
+          assert.strictEqual(error.valueType, 'transfer');
+          assert.strictEqual(error.path, 'buffer');
+          return true;
+        },
+      );
+    });
+
+    void test('top-level proxy() marker works without nestedProxies', async () => {
+      // Top-level markers should work fine - only nested ones throw
+      await using ctx = await setupService(
+        {
+          useCounter(counter: Remoted<Counter>): number {
+            return counter.increment() as unknown as number;
+          },
+        },
+        {debug: true},
+      );
+
+      const counter = new Counter();
+      const result = await ctx.remote.useCounter(
+        proxy(counter) as unknown as Remoted<Counter>,
+      );
+      assert.strictEqual(result, 1);
+    });
+
+    void test('top-level transfer() marker works without nestedProxies', async () => {
+      const {transfer} = await import('../../index.js');
+
+      await using ctx = await setupService(
+        {
+          getBufferSize(buffer: ArrayBuffer): number {
+            return buffer.byteLength;
+          },
+        },
+        {debug: true},
+      );
+
+      const result = await ctx.remote.getBufferSize(
+        transfer(new ArrayBuffer(1024)) as unknown as ArrayBuffer,
+      );
+      assert.strictEqual(result, 1024);
+    });
+  });
 });
 
 void suite('nested proxy mode (nestedProxies: true)', () => {
@@ -348,7 +418,7 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
         {
           // When the counter is wrapped with proxy(), it's proxied and methods return promises
           async useNestedCounter(opts: {
-            counter: LocalProxy<Counter>;
+            counter: AsyncProxy<Counter>;
           }): Promise<number> {
             const counter = opts.counter as unknown as {
               increment: () => Promise<number>;
@@ -391,7 +461,7 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
     void test('nested class instance with proxy() in return value is proxied', async () => {
       await using ctx = await setupService(
         {
-          getCounterHolder(): {counter: LocalProxy<Counter>} {
+          getCounterHolder(): {counter: AsyncProxy<Counter>} {
             // Use proxy() to explicitly mark the class instance
             return {counter: proxy(new Counter())};
           },
@@ -435,8 +505,8 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
       await using ctx = await setupService(
         {
           checkIdentity(data: {
-            a: LocalProxy<Counter>;
-            b: LocalProxy<Counter>;
+            a: AsyncProxy<Counter>;
+            b: AsyncProxy<Counter>;
           }): boolean {
             return data.a === data.b;
           },

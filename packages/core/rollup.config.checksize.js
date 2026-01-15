@@ -24,6 +24,10 @@ export default {
     terser({
       ecma: 2024,
       module: true,
+      compress: {
+        passes: 2,
+        pure_getters: true,
+      },
     }),
     summary({
       showMinifiedSize: true,

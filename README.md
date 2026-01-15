@@ -10,7 +10,7 @@ as if they were local.**
 - **Type-safe:** Your IDE knows exactly what's proxied vs cloned
 - **Ergonomic:** Callbacks, promises, and classes just work
 - **Bidirectional:** The same types and patterns work in both directions
-- **Fast & small:** ~2.3 kB brotli-compressed, zero dependencies
+- **Fast & small:** ~2.4 kB brotli-compressed, zero dependencies
 - **Composable & extendable:** Non-global configuration, nested objects,
   services are just classes, composable transport handlers
 - **Standard modules:** ESM-only, no CommonJS
@@ -66,6 +66,11 @@ const result = await remote.add(1, 2); // 3
   they're automatically proxied
 - **Object proxying with `proxy()`** — Mark class instances, mutable objects, or
   large graphs for proxying instead of cloning
+- **Opaque handles with `handle()`** — Pass references without exposing an async
+  interface
+- **Consistent types** — Proxies and handles work the same on both sides of the
+  worker boundary, so APIs don't change whether a service is used locally or
+  remotely
 - **Transferables with `transfer()`** — Zero-copy transfer for `ArrayBuffer`,
   `MessagePort`, streams, and more
 - **Shallow or deep proxying** — Default shallow mode for speed;

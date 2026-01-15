@@ -2,8 +2,9 @@
  * Wire protocol utilities and runtime helpers.
  *
  * This file contains:
- * - `proxy()` function for explicit proxy marking
- * - Detection helpers (isPromise, isLocalProxy, etc.)
+ * - `proxy()` and `handle()` functions for marking values
+ * - `getProxyValue()` and `getHandleValue()` for accessing underlying values
+ * - Detection helpers (isPromise, isProxyMarker, etc.)
  * - Error serialization/deserialization
  * - NonCloneableError for debug mode
  *
@@ -15,26 +16,60 @@
 import type {
   SerializedError,
   ProxyPropertyMetadata,
-  LocalProxy,
-  LocalHandle,
+  AsyncProxy,
+  Handle,
 } from './types.js';
-import {LOCAL_PROXY, LOCAL_HANDLE, PROXY_PROPERTY_BRAND, TRANSFER} from './constants.js';
+import {
+  PROXY_VALUE,
+  PROXY_PROPERTY_BRAND,
+  TRANSFER,
+  NON_CLONEABLE,
+} from './constants.js';
+
+/**
+ * Internal marker to distinguish proxy markers ('proxy') from handle markers ('handle').
+ * Not exported - only used internally for wire serialization.
+ */
+const MARKER_TYPE = Symbol();
+
+/**
+ * Symbol for accessing the wrapped value inside a handle's wrapper object.
+ */
+const HANDLE_VALUE = Symbol();
+
+/**
+ * WeakMap to cache handle wrappers for identity preservation on round-trips.
+ */
+const handleWrappers = new WeakMap<object, object>();
+
+/**
+ * Internal interface for proxy markers before they're sent over the wire.
+ * Contains the marker type and underlying value.
+ */
+interface ProxyMarker<T> {
+  readonly [PROXY_VALUE]: T;
+  readonly [MARKER_TYPE]: 'proxy' | 'handle';
+}
 
 // ============================================================
 // Proxy marker
 // ============================================================
 
 /**
- * Creates a LocalProxy marker for explicit proxying.
+ * Creates an AsyncProxy marker for explicit proxying.
  *
- * Use this to explicitly mark values that should be proxied rather than cloned.
- * This is required in nested mode for class instances and objects you want to
- * keep mutable/shared.
+ * Use this to mark values that should be proxied rather than cloned.
+ * AsyncProxies provide an async interface for property/method access on both sides.
+ *
+ * - AsyncProxies do NOT auto-unwrap when sent back — they stay as proxies
+ * - Use `getProxyValue(proxy)` to get the underlying value on the owning side
+ * - The same `AsyncProxy<T>` type is used on both sides for consistent APIs
  *
  * **When to use `proxy()`:**
  * - **Mutable objects** — The remote side should see updates
  * - **Large graphs** — Avoid cloning expensive data structures
  * - **Class instances with methods** — Preserve the prototype API
+ * - **Consistent APIs** — Same function signature in and out of workers
  *
  * **When NOT to use `proxy()`:**
  * - Immutable data (cloning is fine, avoids round-trips)
@@ -43,35 +78,132 @@ import {LOCAL_PROXY, LOCAL_HANDLE, PROXY_PROPERTY_BRAND, TRANSFER} from './const
  *
  * @example
  * ```ts
- * // Mutable state
- * createCounter(): LocalProxy<Counter> {
- *   return proxy(new Counter());  // Mutations visible remotely
+ * class MyService {
+ *   createWidget(): AsyncProxy<Widget> {
+ *     return proxy(new Widget());
+ *   }
+ *
+ *   updateWidget(widget: AsyncProxy<Widget>): void {
+ *     const w = getProxyValue(widget);
+ *     w.refresh();
+ *   }
  * }
  *
- * // Large graph
- * getDocument(): LocalProxy<Document> {
- *   return proxy(this.doc);  // Don't clone the entire tree
- * }
- *
- * // Immutable data — just return it (will be cloned)
- * getData(): { value: number } {
- *   return { value: 42 };
- * }
+ * // Client (same types locally and remotely)
+ * const widget = await service.createWidget();  // AsyncProxy<Widget>
+ * await widget.activate();  // Method call is async
+ * await service.updateWidget(widget);  // Pass proxy back
  * ```
  */
-export function proxy<T>(value: T): LocalProxy<T> {
-  return {[LOCAL_PROXY]: true, value};
+export function proxy<T extends object>(
+  value: T,
+  opaque?: boolean,
+): AsyncProxy<T> {
+  // Opaque proxies are simple marker objects - no JS Proxy overhead
+  if (opaque) {
+    return {
+      [PROXY_VALUE]: value,
+      [MARKER_TYPE]: 'handle',
+      __nc: NON_CLONEABLE, // Make non-cloneable
+    } as unknown as AsyncProxy<T>;
+  }
+  // JS Proxy provides async interface and is naturally non-cloneable
+  return new Proxy(NON_CLONEABLE as T, {
+    get(_target, prop) {
+      if (prop === PROXY_VALUE) return value;
+      if (prop === MARKER_TYPE) return 'proxy';
+      // Not thenable at top level (prevents auto-await issues)
+      if (prop === 'then') return undefined;
+      return createLocalProxyProperty(
+        value,
+        prop,
+        (value as Record<string | symbol, unknown>)[prop],
+      );
+    },
+
+    set(_target, prop, newValue) {
+      (value as Record<string | symbol, unknown>)[prop] = newValue;
+      return true;
+    },
+
+    apply(_target, _thisArg, args: Array<unknown>) {
+      if (typeof value === 'function') {
+        return Promise.resolve(
+          (value as (...a: Array<unknown>) => unknown)(...args),
+        );
+      }
+      throw new TypeError('Proxy target is not callable');
+    },
+  }) as unknown as AsyncProxy<T>;
 }
 
 /**
- * Check if a value is a LocalProxy marker.
+ * Create a local proxy property - callable (for methods) and thenable (for property reads).
+ * Mirrors the behavior of remote proxy properties but executes synchronously.
  */
-export function isLocalProxy(value: unknown): value is LocalProxy<unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    Object.hasOwn(value, LOCAL_PROXY)
-  );
+function createLocalProxyProperty(
+  target: object,
+  prop: string | symbol,
+  propValue: unknown,
+): unknown {
+  // Create a callable that invokes the method
+  const callable = (...args: Array<unknown>): Promise<unknown> => {
+    if (typeof propValue === 'function') {
+      return Promise.resolve(propValue.apply(target, args));
+    }
+    throw new TypeError(`${String(prop)} is not a function`);
+  };
+
+  // Make it thenable for property reads: await proxy.prop
+  callable.then = <TResult1 = unknown, TResult2 = never>(
+    onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): Promise<TResult1 | TResult2> => {
+    return Promise.resolve(propValue).then(onfulfilled, onrejected);
+  };
+
+  return callable;
+}
+
+/**
+ * Get the underlying value from an AsyncProxy.
+ *
+ * This only works on the side that created the proxy. Attempting to
+ * dereference a proxy received from the other side will throw, as
+ * the value lives on the remote end.
+ *
+ * @example
+ * ```ts
+ * const widget = new Widget();
+ * const widgetProxy = proxy(widget);
+ * const retrieved = getProxyValue(widgetProxy); // Returns the widget
+ * ```
+ */
+export function getProxyValue<T>(proxy: AsyncProxy<T>): T {
+  const value = (proxy as unknown as ProxyMarker<T>)[PROXY_VALUE];
+  if (value === undefined) {
+    throw new TypeError(
+      'Cannot get value from a remote proxy. ' +
+        'getProxyValue() only works on the side that created the proxy.',
+    );
+  }
+  return value;
+}
+
+/**
+ * Check if a value is a proxy marker (created with proxy() or handle()).
+ */
+export function isProxyMarker(value: unknown): value is ProxyMarker<unknown> {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  return (value as ProxyMarker<unknown>)?.[PROXY_VALUE] !== undefined;
+}
+
+/**
+ * Check if a proxy marker is opaque (created with proxy(v, true) or handle()).
+ */
+export function isOpaqueMarker(value: unknown): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  return (value as ProxyMarker<unknown>)?.[MARKER_TYPE] === 'handle';
 }
 
 // ============================================================
@@ -79,19 +211,15 @@ export function isLocalProxy(value: unknown): value is LocalProxy<unknown> {
 // ============================================================
 
 /**
- * Creates a LocalHandle marker for opaque handle passing.
+ * Creates a Handle marker for opaque handle passing.
  *
- * Use this to mark values that should be passed as opaque handles rather than
- * proxied or cloned. Handles work like proxies in terms of memory management
- * and caching, but don't provide any API on the receiving side and don't
- * auto-unwrap when passed around.
+ * Handles are like proxies but completely opaque — they provide NO interface
+ * for accessing the underlying value remotely. They're useful when you need
+ * consistent APIs but don't need remote property/method access.
  *
- * A handle is only useful for receiving and sending back to the remote side,
- * or as a key representing the remote object. This enables consistent APIs
- * in and out of workers without exposing the full object interface.
- *
- * Use `getHandleValue()` to explicitly dereference a handle and access the
- * underlying value on the side that created it.
+ * - Handles do NOT auto-unwrap when sent back — they stay as handles
+ * - Use `getHandleValue(handle)` to get the underlying value on the owning side
+ * - The same `Handle<T>` type is used on both sides for consistent APIs
  *
  * **When to use `handle()`:**
  * - **Opaque tokens** — Values used as keys or references
@@ -105,39 +233,39 @@ export function isLocalProxy(value: unknown): value is LocalProxy<unknown> {
  * @example
  * ```ts
  * class MyService {
- *   #sessions = new Map<string, Session>();
- * 
- *   createSession(id: string): LocalHandle<Session> {
- *     const session = new Session(id);
- *     this.#sessions.set(id, session);
- *     return handle(session);
+ *   createSession(id: string): Handle<Session> {
+ *     return handle(new Session(id));
  *   }
  *
- *   getSessionName(sessionHandle: LocalHandle<Session>): string {
- *     // Explicitly dereference the handle to access the session
- *     const session = getHandleValue(sessionHandle);
- *     return session.name;
+ *   getSessionName(session: Handle<Session>): string {
+ *     const s = getHandleValue(session);
+ *     return s.name;
  *   }
  * }
- * 
- * // Works the same locally and remotely
- * const sessionHandle = await service.createSession('abc');
- * const name = await service.getSessionName(sessionHandle);
+ *
+ * // Client (same types locally and remotely)
+ * const session = await service.createSession('abc');  // Handle<Session>
+ * // session is opaque — can't access properties
+ * const name = await service.getSessionName(session);  // Pass handle back
  * ```
  */
-export function handle<T>(value: T): LocalHandle<T> {
-  return {[LOCAL_HANDLE]: true, value};
+export function handle<T extends object>(value: T): Handle<T> {
+  // Handles are opaque proxies of a wrapper object. The wrapper provides
+  // distinct identity so the same object can be both a handle and proxy.
+  let wrapper = handleWrappers.get(value);
+  if (wrapper === undefined) {
+    wrapper = {[HANDLE_VALUE]: value};
+    handleWrappers.set(value, wrapper);
+  }
+  return proxy(wrapper, true) as unknown as Handle<T>;
 }
 
 /**
- * Get the underlying value from a LocalHandle.
+ * Get the underlying value from a Handle.
  *
- * This can only be used on the side that created the handle. Attempting to
- * dereference a RemoteHandle (received from the other side) will fail because
- * it's the same type but the value property won't contain the actual object.
- *
- * Note: RemoteHandle and LocalHandle are the same type for API consistency,
- * but only LocalHandle instances created locally will have the actual value.
+ * This only works on the side that created the handle. Attempting to
+ * dereference a handle received from the other side will throw, as
+ * the value lives on the remote end.
  *
  * @example
  * ```ts
@@ -146,22 +274,19 @@ export function handle<T>(value: T): LocalHandle<T> {
  * const retrieved = getHandleValue(sessionHandle); // Returns the session
  * ```
  */
-export function getHandleValue<T>(handle: LocalHandle<T>): T {
-  if (!isLocalHandle(handle)) {
-    throw new TypeError('Expected a LocalHandle');
-  }
-  return handle.value;
-}
-
-/**
- * Check if a value is a LocalHandle marker.
- */
-export function isLocalHandle(value: unknown): value is LocalHandle<unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    Object.hasOwn(value, LOCAL_HANDLE)
+export function getHandleValue<T>(handle: Handle<T>): T {
+  // Handle is a proxy of a wrapper, so first get the wrapper via getProxyValue
+  const wrapper = getProxyValue(
+    handle as unknown as AsyncProxy<{[HANDLE_VALUE]: T}>,
   );
+  const value = wrapper[HANDLE_VALUE];
+  if (value === undefined) {
+    throw new TypeError(
+      'Cannot get value from a remote handle. ' +
+        'getHandleValue() only works on the side that created the handle.',
+    );
+  }
+  return value;
 }
 
 // ============================================================
@@ -206,11 +331,8 @@ export function transfer<T extends Transferable>(value: T): TransferMarker<T> {
 export function isTransferMarker(
   value: unknown,
 ): value is TransferMarker<Transferable> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    Object.hasOwn(value, TRANSFER)
-  );
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-unnecessary-boolean-literal-compare
+  return (value as TransferMarker<Transferable>)?.[TRANSFER] === true;
 }
 
 // ============================================================
@@ -264,31 +386,22 @@ export function serializeError(error: unknown): SerializedError {
 export function deserializeError(serialized: SerializedError): Error {
   const error = new Error(serialized.message);
   error.name = serialized.name;
-  if (serialized.stack) {
-    error.stack = serialized.stack;
-  }
+  // @ts-expect-error Stack is writable
+  error.stack = serialized.stack;
   return error;
 }
 
 /**
- * Error thrown when a non-cloneable value is encountered in shallow mode.
+ * Error thrown when a non-cloneable value is encountered in debug mode.
  */
 export class NonCloneableError extends Error {
   constructor(
-    public readonly valueType: 'function' | 'class-instance' | 'promise',
+    public readonly valueType: 'function' | 'promise' | 'proxy' | 'transfer',
     public readonly path: string,
   ) {
-    const t =
-      valueType === 'function'
-        ? 'Function'
-        : valueType === 'promise'
-          ? 'Promise'
-          : 'Class instance';
-    const hint =
-      valueType === 'class-instance'
-        ? 'Use proxy() to wrap it, or use nestedProxies: true for functions/promises.'
-        : 'Use nestedProxies: true to auto-proxy nested functions and promises.';
-    super(`${t} at "${path}" cannot be cloned. ${hint}`);
+    super(
+      `The nested ${valueType} at "${path}" cannot be cloned. Use nestedProxies: true.`,
+    );
     this.name = 'NonCloneableError';
   }
 }
