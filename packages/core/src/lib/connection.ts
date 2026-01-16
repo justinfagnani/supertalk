@@ -279,7 +279,10 @@ export class Connection {
     seen: Map<object, unknown>,
   ): unknown {
     // Null and primitives are sent directly
-    if (value == null || (typeof value !== 'object' && typeof value !== 'function')) {
+    if (
+      value == null ||
+      (typeof value !== 'object' && typeof value !== 'function')
+    ) {
       return value;
     }
 
@@ -413,7 +416,8 @@ export class Connection {
    */
   #makeFromWireContext(seen: Map<object, unknown>): FromWireContext {
     return {
-      fromWire: (wire: WireValue): unknown => this.#processFromClone(wire, seen),
+      fromWire: (wire: WireValue): unknown =>
+        this.#processFromClone(wire, seen),
     };
   }
 
