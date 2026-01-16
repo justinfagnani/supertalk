@@ -1,5 +1,9 @@
 # @supertalk/signals
 
+> [!WARNING]
+> This is a pre-release package under active development. APIs may change without
+> notice between versions.
+
 TC39 Signals integration for Supertalk. Synchronize reactive state across
 workers with automatic batched updates.
 

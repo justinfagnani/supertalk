@@ -1,5 +1,9 @@
 # Supertalk
 
+> [!WARNING]
+> This is a pre-release package under active development. APIs may change without
+> notice between versions.
+
 A type-safe, unified communication library for Web Workers, Iframes, and Node.js
 worker threads.
 
