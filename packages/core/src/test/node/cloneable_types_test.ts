@@ -84,7 +84,7 @@ void suite('cloneable types: Map', () => {
         id: number,
         options: {flag: boolean},
         settings: Map<string, string>,
-      ): string[] {
+      ): Array<string> {
         assert.ok(
           settings instanceof Map,
           `Expected Map but got ${Object.prototype.toString.call(settings)}`,
@@ -385,13 +385,13 @@ void suite('cloneable types: combined', () => {
     const result = await ctx.remote.echo(input);
     assert.ok(result instanceof Map);
 
-    const evens = result.get('evens');
+    const evens = result.get('evens') as Set<number> | undefined;
     assert.ok(evens instanceof Set);
     assert.ok(evens.has(2));
     assert.ok(evens.has(4));
     assert.ok(evens.has(6));
 
-    const odds = result.get('odds');
+    const odds = result.get('odds') as Set<number> | undefined;
     assert.ok(odds instanceof Set);
     assert.ok(odds.has(1));
     assert.ok(odds.has(3));

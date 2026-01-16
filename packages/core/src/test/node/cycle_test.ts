@@ -178,10 +178,14 @@ void suite('cyclic payloads - debug mode', () => {
 
     assert.strictEqual(result.value, 'root');
     assert.strictEqual(result.children.length, 2);
-    assert.strictEqual(result.children[0]!.value, 'child1');
-    assert.strictEqual(result.children[0]!.parent, result);
-    assert.strictEqual(result.children[1]!.value, 'child2');
-    assert.strictEqual(result.children[1]!.parent, result);
+    const resultChild0 = result.children[0];
+    const resultChild1 = result.children[1];
+    assert.ok(resultChild0);
+    assert.ok(resultChild1);
+    assert.strictEqual(resultChild0.value, 'child1');
+    assert.strictEqual(resultChild0.parent, result);
+    assert.strictEqual(resultChild1.value, 'child2');
+    assert.strictEqual(resultChild1.parent, result);
   });
 });
 

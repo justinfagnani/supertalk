@@ -577,7 +577,10 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
           describeCounter(counter: Counter): string {
             // The counter arrives as a plain object {}, not a Counter instance
             const hasIncrement = 'increment' in counter;
-            const proto = Object.getPrototypeOf(counter);
+            const proto = Object.getPrototypeOf(counter) as {
+              constructor?: {name?: string};
+            } | null;
+            // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
             return `hasIncrement=${hasIncrement}, proto=${proto?.constructor?.name ?? 'null'}`;
           },
         },
@@ -615,7 +618,10 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
         {
           describeData(data: {name: string; counter: Counter}): string {
             const hasIncrement = 'increment' in data.counter;
-            const proto = Object.getPrototypeOf(data.counter);
+            const proto = Object.getPrototypeOf(data.counter) as {
+              constructor?: {name?: string};
+            } | null;
+            // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
             return `name=${data.name}, hasIncrement=${hasIncrement}, proto=${proto?.constructor?.name ?? 'null'}`;
           },
         },
@@ -638,6 +644,7 @@ void suite('nested proxy mode (nestedProxies: true)', () => {
             counter: AsyncProxy<Counter>;
           }): Promise<string> {
             const val = await data.counter.increment();
+            // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
             return `${data.name}: ${val}`;
           },
         },

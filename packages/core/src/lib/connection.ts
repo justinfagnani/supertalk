@@ -290,7 +290,7 @@ export class Connection {
     // This must happen before any other object processing to avoid:
     // - Creating duplicate wire proxies for the same object
     // - Registering the same promise multiple times with different IDs
-    const cached = seen.get(value as object);
+    const cached = seen.get(value);
     if (cached !== undefined) {
       return cached;
     }
@@ -351,7 +351,7 @@ export class Connection {
           const ctx: ToWireContext = {
             toWire: (v: unknown, key?: string): WireValue => {
               const p = key ? (path ? `${path}.${key}` : key) : path;
-              return this.#processForClone(v, p, transfers, seen) as WireValue;
+              return this.#processForClone(v, p, transfers, seen);
             },
           };
           const wire = handler.toWire(value, ctx);
