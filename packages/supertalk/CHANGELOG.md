@@ -1,5 +1,12 @@
 # supertalk
 
+## 0.0.6
+
+### Patch Changes
+
+- Updated dependencies [79b0d6f]
+  - @supertalk/core@0.0.5
+
 ## 0.0.5
 
 ### Patch Changes
