@@ -1,5 +1,11 @@
 # @supertalk/core
 
+## 0.0.5
+
+### Patch Changes
+
+- 79b0d6f: Fix an infinite loop bug with payloads with cycles
+
 ## 0.0.4
 
 ### Patch Changes
