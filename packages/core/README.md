@@ -1,5 +1,9 @@
 # @supertalk/core
 
+[![CI](https://github.com/justinfagnani/supertalk/actions/workflows/ci.yml/badge.svg)](https://github.com/justinfagnani/supertalk/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/@supertalk/core.svg)](https://www.npmjs.com/package/@supertalk/core)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 > [!WARNING]
 > This is a pre-release package under active development. APIs may change without
 > notice between versions.
