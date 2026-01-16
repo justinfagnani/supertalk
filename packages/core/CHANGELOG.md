@@ -1,5 +1,11 @@
 # @supertalk/core
 
+## 0.0.4
+
+### Patch Changes
+
+- 75d8c36: Only recursively traverse plain objects so that natively cloneable objects like Maps are handled correctly
+
 ## 0.0.3
 
 ### Patch Changes
