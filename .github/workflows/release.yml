@@ -38,8 +38,8 @@ jobs:
   publish:
     name: Publish
     runs-on: ubuntu-latest
-    # Only run when the release PR is merged (commit message starts with "chore: release")
-    if: "${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'chore: release packages') }}"
+    # Only run when the release PR is merged
+    if: "${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, '[all] Version packages') }}"
     steps:
       - uses: actions/checkout@v4
 
