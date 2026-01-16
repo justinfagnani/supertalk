@@ -1,14 +1,6 @@
 import {suite, test} from 'node:test';
 import * as assert from 'node:assert';
-import {VERSION} from '../../index.js';
 import {setupService} from './test-utils.js';
-
-void suite('@supertalk/core', () => {
-  void test('should export VERSION', () => {
-    assert.strictEqual(typeof VERSION, 'string');
-    assert.ok(VERSION.length > 0);
-  });
-});
 
 void suite('expose and wrap', () => {
   void test('basic method call', async () => {

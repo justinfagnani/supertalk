@@ -6,8 +6,6 @@
  * @fileoverview Public API exports.
  */
 
-export const VERSION = '0.0.1';
-
 // Core API
 export {expose} from './lib/expose.js';
 export {wrap} from './lib/wrap.js';
