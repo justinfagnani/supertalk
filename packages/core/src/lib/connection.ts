@@ -252,7 +252,8 @@ export class Connection {
       };
     }
     // Delegate all other value handling to processForClone
-    return this.#processForClone(value, path, transfers);
+    // Pass a Map to track cycles when recursing in debug/nested mode
+    return this.#processForClone(value, path, transfers, new Map());
   }
 
   /**
@@ -269,12 +270,28 @@ export class Connection {
   /**
    * Process a value for wire serialization.
    * Handles markers, recursion, and debug mode errors.
+   * @param seen - Map tracking visited objects to their processed results (for cycle detection)
    */
   #processForClone(
     value: unknown,
     path: string,
     transfers: Array<Transferable>,
+    seen: Map<object, unknown>,
   ): unknown {
+    // Null and primitives are sent directly
+    if (value == null || (typeof value !== 'object' && typeof value !== 'function')) {
+      return value;
+    }
+
+    // Check for cycles - return cached result if we've seen this object.
+    // This must happen before any other object processing to avoid:
+    // - Creating duplicate wire proxies for the same object
+    // - Registering the same promise multiple times with different IDs
+    const cached = seen.get(value as object);
+    if (cached !== undefined) {
+      return cached;
+    }
+
     // Transfer markers: add to transfer list and return raw value
     if (isTransferMarker(value)) {
       if (path && this.#debug && !this.#nestedProxies) {
@@ -289,10 +306,12 @@ export class Connection {
       if (path && this.#debug && !this.#nestedProxies) {
         throw new NonCloneableError('proxy', path);
       }
-      return this.#makeProxyWire(
+      const wire = this.#makeProxyWire(
         (value as {[PROXY_VALUE]: object})[PROXY_VALUE],
         isOpaqueMarker(value),
       );
+      seen.set(value as object, wire);
+      return wire;
     }
 
     // Functions are always proxied (or throw in debug-only mode)
@@ -300,17 +319,16 @@ export class Connection {
       if (this.#debug && !this.#nestedProxies) {
         throw new NonCloneableError('function', path);
       }
-      return this.#makeProxyWire(value as object);
-    }
-
-    // Null and primitives are sent directly
-    if (value == null || typeof value !== 'object') {
-      return value;
+      const wire = this.#makeProxyWire(value as object);
+      seen.set(value as object, wire);
+      return wire;
     }
 
     // Check if this is a proxy we received from remote
     if (this.#getRemoteProxyId(value) !== undefined) {
-      return this.#makeProxyWire(value, '__o' in value);
+      const wire = this.#makeProxyWire(value, '__o' in value);
+      seen.set(value, wire);
+      return wire;
     }
 
     // Promises are proxied (or throw in debug-only mode)
@@ -318,7 +336,9 @@ export class Connection {
       if (this.#debug && !this.#nestedProxies) {
         throw new NonCloneableError('promise', path);
       }
-      return {[WIRE_TYPE]: 'promise', id: this.#registerPromise(value)};
+      const wire = {[WIRE_TYPE]: 'promise', id: this.#registerPromise(value)};
+      seen.set(value, wire);
+      return wire;
     }
 
     // Check handlers
@@ -326,12 +346,14 @@ export class Connection {
       for (const handler of this.#handlers) {
         if (handler.canHandle(value)) {
           const ctx: ToWireContext = {
-            toWire: (value: unknown, key?: string): WireValue => {
+            toWire: (v: unknown, key?: string): WireValue => {
               const p = key ? (path ? `${path}.${key}` : key) : path;
-              return this.#toWire(value, p, transfers);
+              return this.#processForClone(v, p, transfers, seen) as WireValue;
             },
           };
-          return handler.toWire(value, ctx);
+          const wire = handler.toWire(value, ctx);
+          seen.set(value, wire);
+          return wire;
         }
       }
     }
@@ -344,9 +366,19 @@ export class Connection {
     }
 
     if (Array.isArray(value)) {
-      return value.map((item, i) =>
-        this.#processForClone(item, `${path}[${String(i)}]`, transfers),
-      );
+      const processed: Array<unknown> = [];
+      seen.set(value, processed); // Cache before recursing to handle cycles
+      for (let i = 0; i < value.length; i++) {
+        processed.push(
+          this.#processForClone(
+            value[i],
+            `${path}[${String(i)}]`,
+            transfers,
+            seen,
+          ),
+        );
+      }
+      return processed;
     }
 
     // Only recurse into plain objects (prototype is Object.prototype or null).
@@ -357,11 +389,13 @@ export class Connection {
     const proto = Object.getPrototypeOf(value);
     if (proto === Object.prototype || proto === null) {
       const processed: Record<string, unknown> = {};
+      seen.set(value, processed); // Cache before recursing to handle cycles
       for (const key of Object.keys(value)) {
         processed[key] = this.#processForClone(
           (value as Record<string, unknown>)[key],
           path ? `${path}.${key}` : key,
           transfers,
+          seen,
         );
       }
       return processed;
@@ -375,11 +409,13 @@ export class Connection {
   // ============================================================
 
   /**
-   * Create a FromWireContext for handlers.
+   * Create a FromWireContext that shares a seen map for cycle detection.
    */
-  #fromWireContext: FromWireContext = {
-    fromWire: (wire: WireValue): unknown => this.#fromWire(wire),
-  };
+  #makeFromWireContext(seen: Map<object, unknown>): FromWireContext {
+    return {
+      fromWire: (wire: WireValue): unknown => this.#processFromClone(wire, seen),
+    };
+  }
 
   /**
    * Deserialize a value from wire format.
@@ -402,29 +438,44 @@ export class Connection {
     }
 
     // Delegate all other wire value handling to processFromClone
-    return this.#processFromClone(wire);
+    // Pass a Map to track cycles when recursing in nested mode
+    return this.#processFromClone(wire, new Map());
   }
 
   /**
    * Process a value from wire format, handling markers and recursion.
+   * @param seen - Map tracking visited objects to their processed results (for cycle detection)
    */
-  #processFromClone(value: unknown): unknown {
+  #processFromClone(value: unknown, seen: Map<object, unknown>): unknown {
     if (value === null || typeof value !== 'object') {
       return value;
     }
 
+    // Check for cycles - return cached result if we've seen this object.
+    // This must happen before any other object processing.
+    const cached = seen.get(value);
+    if (cached !== undefined) {
+      return cached;
+    }
+
     if (isWireProxy(value)) {
       const local = this.#getLocal(value.id);
-      if (local) return proxy(local, value.o);
-      return (
+      if (local) {
+        const result = proxy(local, value.o);
+        seen.set(value, result);
+        return result;
+      }
+      const result =
         this.#getRemoteProxy(value.id) ??
-        this.#createRemoteProxy(value.id, value.o)
-      );
+        this.#createRemoteProxy(value.id, value.o);
+      seen.set(value, result);
+      return result;
     }
 
     if (isWirePromise(value)) {
       const {promise, resolve, reject} = Promise.withResolvers<unknown>();
       this.#pendingRemotePromises.set(value.id, {resolve, reject});
+      seen.set(value, promise);
       return promise;
     }
 
@@ -433,7 +484,9 @@ export class Connection {
     if (typeof wireType === 'string') {
       const handler = this.#handlersByWireType.get(wireType);
       if (handler?.fromWire) {
-        return handler.fromWire(value, this.#fromWireContext);
+        const result = handler.fromWire(value, this.#makeFromWireContext(seen));
+        seen.set(value, result);
+        return result;
       }
     }
 
@@ -443,7 +496,12 @@ export class Connection {
     }
 
     if (Array.isArray(value)) {
-      return value.map((item) => this.#processFromClone(item));
+      const processed: Array<unknown> = [];
+      seen.set(value, processed); // Cache before recursing to handle cycles
+      for (const item of value) {
+        processed.push(this.#processFromClone(item, seen));
+      }
+      return processed;
     }
 
     // Only recurse into plain objects. This protects:
@@ -454,9 +512,11 @@ export class Connection {
     }
 
     const processed: Record<string, unknown> = {};
+    seen.set(value, processed); // Cache before recursing to handle cycles
     for (const key of Object.keys(value)) {
       processed[key] = this.#processFromClone(
         (value as Record<string, unknown>)[key],
+        seen,
       );
     }
     return processed;
@@ -597,11 +657,13 @@ export class Connection {
     args: Array<unknown>,
   ): Promise<unknown> {
     const transfers: Array<Transferable> = [];
+    // Share seen map across all args to preserve identity for shared references
+    const seen = new Map<object, unknown>();
     return this.#sendCall(
       target,
       'call',
       method,
-      args.map((arg) => this.#toWire(arg, '', transfers)),
+      args.map((arg) => this.#processForClone(arg, '', transfers, seen)),
       transfers,
     );
   }
@@ -693,9 +755,14 @@ export class Connection {
    */
   #handleHandlerMessage(wireType: string, payload: WireValue): void {
     try {
-      this.#handlersByWireType
-        .get(wireType)
-        ?.onMessage?.(this.#fromWire(payload), this.#fromWireContext);
+      const handler = this.#handlersByWireType.get(wireType);
+      if (handler?.onMessage) {
+        const seen = new Map<object, unknown>();
+        handler.onMessage(
+          this.#processFromClone(payload, seen),
+          this.#makeFromWireContext(seen),
+        );
+      }
     } catch (error) {
       // Log errors from onMessage but don't propagate them
       // (there's no good place to send them - these are spontaneous messages)
@@ -709,8 +776,11 @@ export class Connection {
   async #handleCall(message: CallMessage): Promise<void> {
     const {id, target, method, args, action} = message;
 
-    // Deserialize arguments
-    const deserializedArgs = args.map((arg) => this.#fromWire(arg));
+    // Deserialize arguments with shared seen map to preserve identity
+    const seen = new Map<object, unknown>();
+    const deserializedArgs = args.map((arg) =>
+      this.#processFromClone(arg, seen),
+    );
 
     // Look up the target object
     const proxyTarget = this.#getLocal(target);
